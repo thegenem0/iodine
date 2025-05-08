@@ -1,7 +1,6 @@
 [workspace]
-name = "iodine"
 resolver = "2"
-members = ["iodine-common"]
+members = ["iodine-common", "iodine-state/iodine-migration"]
 
 [workspace.dependencies]
 tokio = { version = "1", features = ["full"] }

@@ -30,6 +30,7 @@ pub enum TaskStatus {
     Retrying,
     Succeeded,
     Failed,
+    Cancelling,
     Cancelled,
     Skipped,
 }
