@@ -1,0 +1,30 @@
+[workspace]
+name = "iodine"
+resolver = "2"
+members = ["iodine-common"]
+
+[workspace.dependencies]
+tokio = { version = "1", features = ["full"] }
+uuid = { version = "1.16.0", features = ["v4", "serde"] }
+async-trait = "0.1.88"
+serde = { version = "1.0.219", features = ["derive"] }
+serde_json = "1.0.140"
+thiserror = "2.0.12"
+tracing = "0.1.41"
+chrono = "0.4.40"
+prost = "0.13.5"
+tonic = "0.13.0"
+tonic-build = "0.13.0"
+tracing-subscriber = {version = "0.3.19", features = ["env-filter"]}
+dotenvy = "0.15.7"
+async-graphql = {version = "7.0.16", features = ["chrono", "uuid"]}
+async-graphql-axum = "7.0.16"
+axum = "0.8.3"
+strum = "0.27.1"
+strum_macros = "0.27.1"
+sea-orm = "1.1.10"
+async-std = "1"
+prost-types = "0.13.5"
+rand = "0.9.1"
+sea-orm-migration = "1.1.0"
+tower-http = "0.6.2"
