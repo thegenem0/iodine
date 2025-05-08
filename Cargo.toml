@@ -1,8 +1,10 @@
 [workspace]
 resolver = "2"
-members = ["iodine-common", "iodine-state/iodine-migration"]
+members = ["iodine-common", "iodine-state/iodine-migration", "iodine-state/iodine-persistence-pg"]
 
 [workspace.dependencies]
+iodine-common = { path = "iodine-common" }
+
 tokio = { version = "1", features = ["full"] }
 uuid = { version = "1.16.0", features = ["v4", "serde"] }
 async-trait = "0.1.88"
