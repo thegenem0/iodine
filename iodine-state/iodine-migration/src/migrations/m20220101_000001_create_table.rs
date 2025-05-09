@@ -69,7 +69,8 @@ impl MigrationTrait for Migration {
                     )
                     .col(ColumnDef::new(PipelineDefinition::Name).string())
                     .col(ColumnDef::new(PipelineDefinition::Description).text())
-                    .col(ColumnDef::new(PipelineDefinition::RunConfig).json_binary())
+                    .col(ColumnDef::new(PipelineDefinition::DefaultBackend).text()) // TODO(thegenem0): maybe enum?
+                    .col(ColumnDef::new(PipelineDefinition::DefaultTags).json_binary())
                     .col(ColumnDef::new(PipelineDefinition::Metadata).json_binary())
                     .col(
                         ColumnDef::new(PipelineDefinition::CreatedAt)
@@ -104,7 +105,6 @@ impl MigrationTrait for Migration {
                             .custom(DbPipelineRunStatus::name())
                             .not_null(),
                     )
-                    .col(ColumnDef::new(PipelineRun::RunConfig).json_binary())
                     .col(ColumnDef::new(PipelineRun::Tags).json_binary())
                     .col(ColumnDef::new(PipelineRun::TriggerInfo).json_binary())
                     .col(ColumnDef::new(PipelineRun::StartTime).timestamp_with_time_zone()) // Nullable
@@ -295,7 +295,7 @@ impl MigrationTrait for Migration {
                             .not_null()
                             .default(Expr::current_timestamp()),
                     )
-                    .col(ColumnDef::new(EventLog::RunId).uuid().not_null())
+                    .col(ColumnDef::new(EventLog::RunId).uuid())
                     .col(ColumnDef::new(EventLog::TaskId).uuid())
                     .col(ColumnDef::new(EventLog::EventType).text().not_null())
                     .col(ColumnDef::new(EventLog::Message).text())

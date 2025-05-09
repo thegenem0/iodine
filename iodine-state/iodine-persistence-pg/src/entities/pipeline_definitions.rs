@@ -11,8 +11,10 @@ pub struct Model {
     pub name: Option<String>,
     #[sea_orm(column_type = "Text", nullable)]
     pub description: Option<String>,
+    #[sea_orm(column_type = "Text", nullable)]
+    pub default_backend: Option<String>,
     #[sea_orm(column_type = "JsonBinary", nullable)]
-    pub run_config: Option<Json>,
+    pub default_tags: Option<Json>,
     #[sea_orm(column_type = "JsonBinary", nullable)]
     pub metadata: Option<Json>,
     pub created_at: DateTimeWithTimeZone,

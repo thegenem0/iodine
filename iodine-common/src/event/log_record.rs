@@ -11,7 +11,7 @@ use std::str::FromStr;
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct EventLogRecord {
     pub event_id: i64,
-    pub run_id: Uuid,
+    pub run_id: Option<Uuid>,
     pub task_id: Option<Uuid>,
     pub timestamp: DateTime<Utc>,
     pub event_type: EventType,
@@ -24,9 +24,9 @@ pub struct EventLogRecord {
 #[non_exhaustive]
 pub enum EventType {
     // Pipeline lifecycle
-    DefinitionAdded,
+    DefinitionRegistered,
     DefinitionUpdated,
-    DefinitionDeleted,
+    DefinitionDeregistered,
 
     // Run lifecycle
     RunEnqueued,

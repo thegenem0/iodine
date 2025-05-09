@@ -1,0 +1,630 @@
+use std::collections::HashMap;
+
+use async_trait::async_trait;
+use chrono::{DateTime, FixedOffset, Utc};
+use iodine_common::error::WorkerError;
+use iodine_common::event::EventType;
+use iodine_common::pipeline::PipelineInfo;
+use iodine_common::task::{TaskDefinition, TaskDependency, TaskStatus};
+use iodine_common::{
+    error::Error,
+    pipeline::{PipelineDefinition, PipelineRun, PipelineRunStatus},
+    state::PipelineDbTrait,
+};
+use sea_orm::ActiveValue::{self, Set};
+use sea_orm::prelude::Expr;
+use sea_orm::{ColumnTrait, Condition, EntityTrait, QueryFilter, TransactionTrait};
+use uuid::Uuid;
+
+use crate::db::PostgresStateDb;
+use crate::entities::{
+    pipeline_definitions, pipeline_runs, task_definitions, task_dependencies, task_instances,
+};
+use crate::event_logging::{log_event_direct, log_event_in_txn};
+use crate::mapping::{
+    db_error_to_domain, domain_pipeline_status_to_db, domain_task_status_to_db,
+    pipeline_definition_to_domain, pipeline_info_to_domain, pipeline_run_to_domain,
+    pipeline_status_as_expr, pipeline_status_to_domain,
+};
+
+#[async_trait]
+#[allow(unused_variables)]
+impl PipelineDbTrait for PostgresStateDb {
+    async fn get_pipeline_definition(
+        &self,
+        pipeline_id: Uuid,
+    ) -> Result<Option<PipelineDefinition>, Error> {
+        let maybe_pipeline_def = pipeline_definitions::Entity::find_by_id(pipeline_id)
+            .one(&self.conn)
+            .await
+            .map_err(db_error_to_domain)?;
+
+        let task_defs = task_definitions::Entity::find()
+            .filter(task_definitions::Column::PipelineId.eq(pipeline_id))
+            .all(&self.conn)
+            .await
+            .map_err(db_error_to_domain)?;
+
+        let task_deps = task_dependencies::Entity::find()
+            .filter(task_dependencies::Column::PipelineId.eq(pipeline_id))
+            .all(&self.conn)
+            .await
+            .map_err(db_error_to_domain)?;
+
+        if let Some(pipeline_def) = maybe_pipeline_def {
+            Ok(Some(pipeline_definition_to_domain(
+                pipeline_def,
+                task_defs,
+                task_deps,
+            )))
+        } else if !task_defs.is_empty() && !task_deps.is_empty() {
+            Err(Error::Internal(format!(
+                "Pipeline definition not found, but {} task definitions and {} dependencies were found",
+                task_defs.len(),
+                task_deps.len()
+            )))
+        } else {
+            Ok(None)
+        }
+    }
+
+    async fn list_pipeline_definitions(&self) -> Result<(Vec<PipelineInfo>, u64), Error> {
+        let pipeline_defs = pipeline_definitions::Entity::find()
+            .all(&self.conn)
+            .await
+            .map_err(db_error_to_domain)?;
+
+        let total_count = pipeline_defs.len();
+
+        Ok((
+            pipeline_defs
+                .into_iter()
+                .map(pipeline_info_to_domain)
+                .collect(),
+            total_count as u64,
+        ))
+    }
+
+    async fn get_pipeline_run(&self, run_id: Uuid) -> Result<Option<PipelineRun>, Error> {
+        let maybe_pipeline_run = pipeline_runs::Entity::find_by_id(run_id)
+            .one(&self.conn)
+            .await
+            .map_err(db_error_to_domain)?;
+
+        Ok(maybe_pipeline_run.map(pipeline_run_to_domain))
+    }
+
+    async fn get_active_runs(&self) -> Result<Vec<(Uuid, PipelineRunStatus)>, Error> {
+        let active_runs = pipeline_runs::Entity::find()
+            .filter(
+                pipeline_runs::Column::Status
+                    .eq(domain_pipeline_status_to_db(PipelineRunStatus::Running)),
+            )
+            .filter(
+                pipeline_runs::Column::Status
+                    .eq(domain_pipeline_status_to_db(PipelineRunStatus::Queued)),
+            )
+            .all(&self.conn)
+            .await
+            .map_err(db_error_to_domain)?;
+
+        Ok(active_runs
+            .into_iter()
+            .map(|run| (run.id, pipeline_status_to_domain(run.status)))
+            .collect())
+    }
+
+    async fn list_runs(&self) -> Result<(Vec<PipelineRun>, u64), Error> {
+        let runs = pipeline_runs::Entity::find()
+            .all(&self.conn)
+            .await
+            .map_err(db_error_to_domain)?;
+
+        let total_count = runs.len();
+
+        Ok((
+            runs.into_iter().map(pipeline_run_to_domain).collect(),
+            total_count as u64,
+        ))
+    }
+
+    async fn register_pipeline(
+        &self,
+        definition: &PipelineDefinition,
+        tasks: &[TaskDefinition],
+        dependencies: &[TaskDependency],
+    ) -> Result<(), Error> {
+        let txn = self.conn.begin().await.map_err(db_error_to_domain)?;
+        let def_id = definition.info.id;
+
+        task_dependencies::Entity::delete_many()
+            .filter(task_dependencies::Column::PipelineId.eq(def_id))
+            .exec(&txn)
+            .await
+            .map_err(db_error_to_domain)?;
+
+        task_definitions::Entity::delete_many()
+            .filter(task_definitions::Column::PipelineId.eq(def_id))
+            .exec(&txn)
+            .await
+            .map_err(db_error_to_domain)?;
+
+        let def_active_model = pipeline_definitions::ActiveModel {
+            id: Set(definition.info.id),
+            name: Set(Some(definition.info.name.clone())),
+            description: Set(Some(definition.info.description.clone())),
+            metadata: Set(definition.info.metadata.clone()),
+            created_at: ActiveValue::NotSet,
+            updated_at: Set(Utc::now().into()),
+            default_backend: Set(Some(definition.info.default_backend.to_string())),
+            default_tags: Set(definition.info.default_tags.clone()),
+        };
+
+        let update_event: EventType;
+
+        match pipeline_definitions::Entity::find_by_id(def_id)
+            .one(&txn)
+            .await
+            .map_err(db_error_to_domain)?
+        {
+            Some(_) => {
+                update_event = EventType::DefinitionUpdated;
+
+                pipeline_definitions::Entity::update(def_active_model)
+                    .filter(pipeline_definitions::Column::Id.eq(def_id))
+                    .exec(&txn)
+                    .await
+                    .map_err(db_error_to_domain)?;
+            }
+            None => {
+                update_event = EventType::DefinitionRegistered;
+
+                pipeline_definitions::Entity::insert(def_active_model)
+                    .exec(&txn)
+                    .await
+                    .map_err(db_error_to_domain)?;
+            }
+        };
+
+        let taks_inserts: Vec<task_definitions::ActiveModel> = tasks
+            .iter()
+            .map(|task| task_definitions::ActiveModel {
+                id: Set(task.id),
+                pipeline_id: Set(task.pipeline_id),
+                name: Set(task.name.clone()),
+                description: Set(task.description.clone()),
+                config_schema: Set(task.config_schema.clone()),
+
+                user_code_metadata: Set(task.user_code_metadata.clone()),
+            })
+            .collect();
+
+        if !taks_inserts.is_empty() {
+            task_definitions::Entity::insert_many(taks_inserts)
+                .exec(&txn)
+                .await
+                .map_err(db_error_to_domain)?;
+        }
+
+        let dep_inserts: Vec<task_dependencies::ActiveModel> = dependencies
+            .iter()
+            .map(|dep| task_dependencies::ActiveModel {
+                pipeline_id: Set(dep.pipeline_id),
+                source_task_definition_id: Set(dep.source_task_definition_id),
+                source_output_name: Set(dep.source_output_name.clone()),
+                target_task_definition_id: Set(dep.target_task_definition_id),
+                target_input_name: Set(dep.target_input_name.clone()),
+            })
+            .collect();
+
+        if !dep_inserts.is_empty() {
+            task_dependencies::Entity::insert_many(dep_inserts)
+                .exec(&txn)
+                .await
+                .map_err(db_error_to_domain)?;
+        }
+
+        let message = format!(
+            "Registered pipeline definition with id {}, {} nodes and {} dependencies",
+            definition.info.id,
+            tasks.len(),
+            dependencies.len()
+        );
+
+        log_event_in_txn(&txn, None, None, update_event, Some(message), None)
+            .await
+            .map_err(db_error_to_domain)?;
+
+        txn.commit().await.map_err(db_error_to_domain)?;
+
+        Ok(())
+    }
+
+    async fn deregister_pipeline(&self, pipeline_id: Uuid) -> Result<(), Error> {
+        // TODO(thegenem0):
+        // probably don't want to actually delete these records.
+        // could be used for historical viewing, maybe just mark them as deregistered?
+
+        let txn = self.conn.begin().await.map_err(db_error_to_domain)?;
+
+        let pipeline_def = pipeline_definitions::Entity::find_by_id(pipeline_id)
+            .one(&txn)
+            .await
+            .map_err(db_error_to_domain)?;
+
+        if let Some(pipeline_def) = pipeline_def {
+            task_dependencies::Entity::delete_many()
+                .filter(task_dependencies::Column::PipelineId.eq(pipeline_id))
+                .exec(&txn)
+                .await
+                .map_err(db_error_to_domain)?;
+
+            task_definitions::Entity::delete_many()
+                .filter(task_definitions::Column::PipelineId.eq(pipeline_id))
+                .exec(&txn)
+                .await
+                .map_err(db_error_to_domain)?;
+
+            pipeline_definitions::Entity::delete_by_id(pipeline_id)
+                .exec(&txn)
+                .await
+                .map_err(db_error_to_domain)?;
+        }
+
+        let message = format!("Deregistered pipeline definition with id {}", pipeline_id);
+
+        log_event_in_txn(
+            &txn,
+            None,
+            None,
+            EventType::DefinitionDeregistered,
+            Some(message),
+            None,
+        )
+        .await
+        .map_err(db_error_to_domain)?;
+
+        txn.commit().await.map_err(db_error_to_domain)?;
+
+        Ok(())
+    }
+
+    async fn create_new_run(
+        &self,
+        pipeline_id: Uuid,
+        run_config: Option<serde_json::Value>,
+        tags: Option<serde_json::Value>,
+        trigger_info: Option<serde_json::Value>,
+        initial_run_status: PipelineRunStatus,
+        tasks_in_pipeline: &HashMap<Uuid, TaskDefinition>,
+    ) -> Result<(), Error> {
+        let now: DateTime<FixedOffset> = Utc::now().into();
+        let run_id = Uuid::new_v4();
+        let txn = self.conn.begin().await.map_err(db_error_to_domain)?;
+
+        let new_run = pipeline_runs::ActiveModel {
+            id: Set(run_id),
+            definition_id: Set(pipeline_id),
+            status: Set(domain_pipeline_status_to_db(PipelineRunStatus::Queued)),
+            tags: Set(tags),
+            trigger_info: Set(trigger_info.clone()),
+            start_time: Set(Some(now)),
+            ..Default::default()
+        };
+
+        let insert_run_res = pipeline_runs::Entity::insert(new_run).exec(&txn).await;
+
+        if let Err(db_err) = insert_run_res {
+            txn.rollback().await.map_err(db_error_to_domain)?;
+
+            log_event_direct(
+                &self.conn,
+                Some(run_id),
+                None,
+                EventType::RunFailure,
+                Some(format!(
+                    "Failed run creation: insert dag_runs failed: {}",
+                    db_err
+                )),
+                trigger_info.clone(),
+            )
+            .await?;
+
+            return Err(db_error_to_domain(db_err));
+        }
+
+        let run_event_type = match initial_run_status {
+            PipelineRunStatus::Queued => EventType::RunEnqueued,
+            PipelineRunStatus::Pending => EventType::RunStarting,
+            _ => EventType::RunStart,
+        };
+
+        if let Err(db_err) = log_event_in_txn(
+            &txn,
+            Some(run_id),
+            None,
+            run_event_type,
+            None,
+            trigger_info.clone(),
+        )
+        .await
+        {
+            txn.rollback().await.map_err(db_error_to_domain)?;
+            log_event_direct(
+                &self.conn,
+                Some(run_id),
+                None,
+                EventType::RunFailure,
+                Some(format!("Failed run creation: log event failed: {}", db_err)),
+                trigger_info.clone(),
+            )
+            .await?;
+            return Err(db_error_to_domain(db_err));
+        }
+
+        let mut instance_inserts = Vec::new();
+
+        for (task_def_id, task_def) in tasks_in_pipeline {
+            let instance_id = Uuid::new_v4();
+            let new_instance = task_instances::ActiveModel {
+                id: Set(instance_id),
+                run_id: Set(run_id),
+                definition_id: Set(*task_def_id),
+                name: Set(task_def.name.clone()),
+                status: Set(domain_task_status_to_db(TaskStatus::Pending)),
+                attempts: Set(0),
+                created_at: Set(now),
+                updated_at: Set(now),
+                start_time: Set(None),
+                end_time: Set(None),
+                worker_id: Set(None),
+                output_metadata: Set(None),
+                error_data: Set(None),
+                last_heartbeat: Set(None),
+            };
+
+            instance_inserts.push(new_instance);
+        }
+
+        if !instance_inserts.is_empty() {
+            if let Err(db_err) = task_instances::Entity::insert_many(instance_inserts)
+                .exec(&txn)
+                .await
+            {
+                txn.rollback().await.map_err(db_error_to_domain)?;
+
+                log_event_direct(
+                    &self.conn,
+                    Some(run_id),
+                    None,
+                    EventType::RunFailure,
+                    Some(format!("Failed to insert node_instances: {}", db_err)),
+                    trigger_info.clone(),
+                )
+                .await?;
+
+                return Err(db_error_to_domain(db_err));
+            }
+        }
+
+        for task_def_id in tasks_in_pipeline.keys() {
+            if let Err(db_err) = log_event_in_txn(
+                &txn,
+                Some(run_id),
+                Some(*task_def_id),
+                EventType::TaskPending,
+                None,
+                None,
+            )
+            .await
+            {
+                txn.rollback().await.map_err(db_error_to_domain)?;
+
+                log_event_direct(
+                    &self.conn,
+                    Some(run_id),
+                    None,
+                    EventType::RunFailure,
+                    Some(format!(
+                        "Failed to log task pending event for node {}: {}",
+                        task_def_id, db_err
+                    )),
+                    trigger_info.clone(),
+                )
+                .await?;
+
+                return Err(db_error_to_domain(db_err));
+            }
+        }
+
+        txn.commit().await.map_err(db_error_to_domain)?;
+
+        Ok(())
+    }
+
+    async fn record_run_staus_change(
+        &self,
+        run_id: Uuid,
+        new_status: PipelineRunStatus,
+        metadata: Option<serde_json::Value>,
+    ) -> Result<(), Error> {
+        let txn = self.conn.begin().await.map_err(db_error_to_domain)?;
+
+        let event_type = match new_status {
+            PipelineRunStatus::Queued => EventType::RunEnqueued,
+            PipelineRunStatus::Pending => EventType::RunStarting,
+            PipelineRunStatus::Running => EventType::RunStart,
+            PipelineRunStatus::Succeeded => EventType::RunSuccess,
+            PipelineRunStatus::Failed => EventType::RunFailure,
+            PipelineRunStatus::Cancelling => EventType::RunCanceling,
+            PipelineRunStatus::Cancelled => EventType::RunCanceled,
+        };
+
+        let update_res = pipeline_runs::Entity::update_many()
+            .col_expr(
+                pipeline_runs::Column::Status,
+                pipeline_status_as_expr(PipelineRunStatus::Queued),
+            )
+            .col_expr(
+                pipeline_runs::Column::UpdatedAt,
+                Expr::value(Some(Utc::now())),
+            )
+            .filter(pipeline_runs::Column::Id.eq(run_id))
+            .exec(&txn)
+            .await;
+
+        match update_res {
+            Ok(res) if res.rows_affected > 0 => {
+                if let Err(db_err) =
+                    log_event_in_txn(&txn, Some(run_id), None, event_type, None, metadata.clone())
+                        .await
+                {
+                    txn.rollback().await.map_err(db_error_to_domain)?;
+
+                    log_event_direct(
+                        &self.conn,
+                        Some(run_id),
+                        None,
+                        EventType::EngineEvent,
+                        Some(format!(
+                            "Failed to log enqueue event for run{}: {}",
+                            run_id, db_err
+                        )),
+                        Some(serde_json::json!({"action": "record_run_enqueued"})),
+                    )
+                    .await?;
+
+                    return Err(db_error_to_domain(db_err));
+                }
+
+                txn.commit().await.map_err(db_error_to_domain)?;
+
+                return Ok(());
+            }
+            Ok(_) => {
+                txn.rollback().await.map_err(db_error_to_domain)?;
+
+                Err(Error::NotFound {
+                    resource_type: "DagRun".into(),
+                    resource_id: run_id.to_string(),
+                })
+            }
+            Err(db_err) => {
+                txn.rollback().await.map_err(db_error_to_domain)?;
+
+                log_event_direct(
+                    &self.conn,
+                    Some(run_id),
+                    None,
+                    EventType::EngineEvent,
+                    Some(format!("Failed DB update for run enqueue: {}", db_err)),
+                    Some(serde_json::json!({"action": "record_run_enqueued"})),
+                )
+                .await?;
+
+                Err(db_error_to_domain(db_err))
+            }
+        }
+    }
+
+    async fn finalize_run(
+        &self,
+        run_id: Uuid,
+        final_status: PipelineRunStatus,
+        error_info: Option<&WorkerError>,
+    ) -> Result<(), Error> {
+        if !matches!(
+            final_status,
+            PipelineRunStatus::Succeeded | PipelineRunStatus::Failed | PipelineRunStatus::Cancelled
+        ) {
+            return Err(Error::InvalidInput(
+                "Final status must be Succeeded, Failed, or Cancelled".into(),
+            ));
+        }
+
+        let now: DateTime<FixedOffset> = Utc::now().into();
+        let txn = self.conn.begin().await.map_err(db_error_to_domain)?;
+
+        let update_res = pipeline_runs::Entity::update_many()
+            .col_expr(
+                pipeline_runs::Column::Status,
+                pipeline_status_as_expr(final_status),
+            )
+            .col_expr(pipeline_runs::Column::EndTime, Expr::value(Some(now)))
+            .col_expr(pipeline_runs::Column::UpdatedAt, Expr::value(Some(now)))
+            .filter(pipeline_runs::Column::Id.eq(run_id))
+            .filter(
+                Condition::any()
+                    .add(
+                        pipeline_runs::Column::Status
+                            .eq(domain_pipeline_status_to_db(PipelineRunStatus::Running)),
+                    )
+                    .add(
+                        pipeline_runs::Column::Status
+                            .eq(domain_pipeline_status_to_db(PipelineRunStatus::Cancelled)),
+                    ),
+            )
+            .exec(&txn)
+            .await;
+
+        match update_res {
+            Ok(res) if res.rows_affected > 0 => {
+                let (event_type, event_metadata) = match final_status {
+                    PipelineRunStatus::Succeeded => (EventType::RunSuccess, None),
+                    PipelineRunStatus::Failed => {
+                        (EventType::RunFailure, serde_json::to_value(error_info).ok())
+                    }
+                    PipelineRunStatus::Cancelled => (EventType::RunCanceled, None),
+                    _ => unreachable!(),
+                };
+
+                if let Err(db_err) =
+                    log_event_in_txn(&txn, Some(run_id), None, event_type, None, event_metadata)
+                        .await
+                {
+                    txn.rollback().await.map_err(db_error_to_domain)?;
+                    log_event_direct(
+                        &self.conn,
+                        Some(run_id),
+                        None,
+                        EventType::EngineEvent,
+                        Some(format!(
+                            "Failed to log status event for run {}: {}",
+                            run_id, db_err
+                        )),
+                        Some(serde_json::json!({"action": "record_run_status"})),
+                    )
+                    .await?;
+                    return Err(db_error_to_domain(db_err));
+                }
+
+                txn.commit().await.map_err(db_error_to_domain)?;
+
+                return Ok(());
+            }
+            Ok(_) => {
+                txn.rollback().await.map_err(db_error_to_domain)?;
+
+                Err(Error::StateTransition(format!(
+                    "Run {} not found or not in Running/Canceling state for final update",
+                    run_id
+                )))
+            }
+            Err(db_err) => {
+                txn.rollback().await.map_err(db_error_to_domain)?;
+
+                log_event_direct(
+                    &self.conn,
+                    Some(run_id),
+                    None,
+                    EventType::EngineEvent,
+                    Some(format!("Failed DB update for run status: {}", db_err)),
+                    Some(serde_json::json!({"action": "record_run_status"})),
+                )
+                .await?;
+
+                Err(db_error_to_domain(db_err))
+            }
+        }
+    }
+}

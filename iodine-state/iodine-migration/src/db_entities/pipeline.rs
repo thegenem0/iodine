@@ -13,8 +13,10 @@ pub enum PipelineDefinition {
     Name,
     #[iden = "description"]
     Description,
-    #[iden = "run_config"]
-    RunConfig,
+    #[iden = "default_backend"]
+    DefaultBackend,
+    #[iden = "default_tags"]
+    DefaultTags,
     #[iden = "metadata"]
     Metadata,
     #[iden = "created_at"]
@@ -33,8 +35,6 @@ pub enum PipelineRun {
     DefinitionId,
     #[iden = "status"]
     Status,
-    #[iden = "run_config"]
-    RunConfig,
     #[iden = "tags"]
     Tags,
     #[iden = "trigger_info"]

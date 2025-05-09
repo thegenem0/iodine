@@ -12,8 +12,6 @@ pub struct Model {
     pub definition_id: Uuid,
     pub status: PipelineRunStatus,
     #[sea_orm(column_type = "JsonBinary", nullable)]
-    pub run_config: Option<Json>,
-    #[sea_orm(column_type = "JsonBinary", nullable)]
     pub tags: Option<Json>,
     #[sea_orm(column_type = "JsonBinary", nullable)]
     pub trigger_info: Option<Json>,

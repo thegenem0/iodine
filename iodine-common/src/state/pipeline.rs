@@ -4,8 +4,8 @@ use async_trait::async_trait;
 use uuid::Uuid;
 
 use crate::{
-    error::Error,
-    pipeline::{PipelineDefinition, PipelineRun, PipelineRunStatus},
+    error::{Error, WorkerError},
+    pipeline::{PipelineDefinition, PipelineInfo, PipelineRun, PipelineRunStatus},
     task::{TaskDefinition, TaskDependency},
 };
 
@@ -28,7 +28,7 @@ pub trait PipelineDbTrait: BaseDbTrait {
     /// Lists all pipeline definitions
     /// ---
     /// TODO(thegenem0): Should this be paginated?
-    async fn list_pipeline_definitions(&self) -> Result<(Vec<PipelineDefinition>, u64), Error>;
+    async fn list_pipeline_definitions(&self) -> Result<(Vec<PipelineInfo>, u64), Error>;
 
     /// Gets the metadata for a specific pipeline run by `run_id`.
     /// ---
@@ -98,6 +98,6 @@ pub trait PipelineDbTrait: BaseDbTrait {
         &self,
         run_id: Uuid,
         final_status: PipelineRunStatus,
-        error_info: Option<&Error>,
+        error_info: Option<&WorkerError>,
     ) -> Result<(), Error>;
 }

@@ -9,7 +9,7 @@ pub struct Model {
     #[sea_orm(primary_key)]
     pub event_id: i64,
     pub timestamp: DateTimeWithTimeZone,
-    pub run_id: Uuid,
+    pub run_id: Option<Uuid>,
     pub task_id: Option<Uuid>,
     #[sea_orm(column_type = "Text")]
     pub event_type: String,
