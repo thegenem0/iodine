@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use async_trait::async_trait;
 use uuid::Uuid;
 
@@ -46,7 +48,7 @@ pub trait TaskDbTrait: BaseDbTrait {
         &self,
         run_id: Uuid,
         task_id: Uuid,
-    ) -> Result<Vec<(Uuid, TaskStatus)>, Error>;
+    ) -> Result<HashMap<Uuid, TaskStatus>, Error>;
 
     /// Updates the status of a task instance
     /// ---

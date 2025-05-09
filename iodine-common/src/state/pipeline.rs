@@ -37,7 +37,7 @@ pub trait PipelineDbTrait: BaseDbTrait {
     /// Gets all active runs (currently `Running` or `Queued`)
     /// ---
     /// Returns a list of `(run_id, run_status)` tuples
-    async fn get_active_runs(&self) -> Result<Vec<(Uuid, PipelineRunStatus)>, Error>;
+    async fn get_active_runs(&self) -> Result<HashMap<Uuid, PipelineRunStatus>, Error>;
 
     /// Lists all pipeline runs
     /// ---

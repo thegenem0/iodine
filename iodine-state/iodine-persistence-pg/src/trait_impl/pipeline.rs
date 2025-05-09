@@ -94,7 +94,7 @@ impl PipelineDbTrait for PostgresStateDb {
         Ok(maybe_pipeline_run.map(pipeline_run_to_domain))
     }
 
-    async fn get_active_runs(&self) -> Result<Vec<(Uuid, PipelineRunStatus)>, Error> {
+    async fn get_active_runs(&self) -> Result<HashMap<Uuid, PipelineRunStatus>, Error> {
         let active_runs = pipeline_runs::Entity::find()
             .filter(
                 pipeline_runs::Column::Status
