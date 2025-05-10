@@ -29,6 +29,9 @@ pub enum Error {
     #[error("Task Execution Error: {0}")]
     TaskExecution(String),
 
+    #[error("Channel Communication Error: {0}")]
+    ChannelComm(String),
+
     #[error("Configuration Error: {0}")]
     Config(String),
 

@@ -17,3 +17,4 @@ devenv.local.nix
 # Manually added
 local_data
 .env
+ARCHITECTURE.md

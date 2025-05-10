@@ -1,0 +1,44 @@
+syntax = "proto3";
+
+package iodine_proto.v1;
+
+import "google/protobuf/struct.proto";
+
+enum TaskStatusProto {
+  TASK_STATUS_PROTO_UNSPECIFIED = 0;
+  TASK_STATUS_PROTO_PENDING = 1;
+  TASK_STATUS_PROTO_QUEUED = 2;
+  TASK_STATUS_PROTO_RUNNING = 3;
+  TASK_STATUS_PROTO_RETRYING = 4;
+  TASK_STATUS_PROTO_SUCCEEDED = 5;
+  TASK_STATUS_PROTO_FAILED = 6;
+  TASK_STATUS_PROTO_CANCELLING = 7;
+  TASK_STATUS_PROTO_CANCELLED = 8;
+  TASK_STATUS_PROTO_SKIPPED = 9;
+}
+
+message PipelineDefinitionProto {
+  string id = 1;
+  string name = 2;
+  string description = 3;
+  google.protobuf.Struct default_backend = 4;
+  google.protobuf.Struct default_tags = 5;
+  google.protobuf.Struct metadata = 6;
+  repeated TaskDefinitionProto task_definitions = 7;
+  repeated TaskDependencyProto task_dependencies = 8;
+}
+
+message TaskDefinitionProto {
+  string id = 1;
+  string name = 2;
+  string description = 3;
+  google.protobuf.Struct config_schema = 4;
+  google.protobuf.Struct user_code_metadata = 6;
+}
+
+message TaskDependencyProto {
+  string source_task_definition_id = 1;
+  string source_output_name = 2;
+  string target_task_definition_id = 3;
+  string target_input_name = 4;
+}

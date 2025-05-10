@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["iodine-common", "iodine-state/iodine-migration", "iodine-state/iodine-persistence-pg"]
+members = ["iodine-common", "iodine-scheduler", "iodine-state/iodine-migration", "iodine-state/iodine-persistence-pg"]
 
 [workspace.dependencies]
 iodine-common = { path = "iodine-common" }
@@ -29,3 +29,4 @@ prost-types = "0.13.5"
 rand = "0.9.1"
 sea-orm-migration = "1.1.0"
 tower-http = "0.6.2"
+futures = "0.3.31"
