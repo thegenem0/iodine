@@ -1,9 +1,11 @@
 [workspace]
 resolver = "2"
-members = ["iodine-common", "iodine-scheduler", "iodine-state/iodine-migration", "iodine-state/iodine-persistence-pg"]
+members = [ "iodine-api/iodine-api-graphql", "iodine-api/iodine-api-grpc","iodine-common", "iodine-scheduler", "iodine-state/iodine-migration", "iodine-state/iodine-persistence-pg"]
 
 [workspace.dependencies]
 iodine-common = { path = "iodine-common" }
+iodine-persistence-pg = { path = "iodine-state/iodine-persistence-pg" }
+iodine-api-graphql = { path = "iodine-api/iodine-api-graphql" }
 
 tokio = { version = "1", features = ["full"] }
 uuid = { version = "1.16.0", features = ["v4", "serde"] }

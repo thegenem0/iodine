@@ -16,8 +16,6 @@ pub enum LauncherStatus {
     Terminated,
 }
 
-pub struct ResourceManager {}
-
 pub struct PipelineExecutionGraph {
     pub sorted_tasks: Vec<Uuid>,
     pub dependencies: HashMap<Uuid, Vec<Uuid>>, // task -> list of tasks it depends on

@@ -4,10 +4,13 @@ use sea_orm_migration::{
 };
 
 use crate::db_entities::{
-    DbPipelineRunStatus, DbTaskStatus, EventLog, PipelineDefinition, PipelineRun, TaskDefinition,
-    TaskDependency, TaskInstance,
+    Coordinator, DbCoordinatorStatus, DbPipelineRunStatus, DbTaskStatus, EventLog,
+    PipelineDefinition, PipelineRun, TaskDefinition, TaskDependency, TaskInstance,
 };
 
+const IDX_COORDINATORS_IS_LEADER: &str = "idx_coordinators_is_leader";
+const IDX_COORDINATORS_STATUS: &str = "idx_coordinators_status";
+const IDX_COORDINATORS_LAST_HEARTBEAT: &str = "idx_coordinators_last_heartbeat";
 const IDX_PIPELINE_RUNS_STATUS: &str = "idx_pipeline_runs_status";
 const IDX_PIPELINE_RUNS_DEFINITION_ID: &str = "idx_pipeline_runs_definition_id";
 const IDX_PIPELINE_RUNS_CREATED_AT: &str = "idx_pipeline_runs_created_at";
@@ -22,6 +25,9 @@ const IDX_EVENT_LOG_TIMESTAMP: &str = "idx_event_log_timestamp";
 const IDX_TASK_DEF_PIPELINE_ID: &str = "idx_task_def_pipeline_id";
 
 const IDX_NAMES: &[&str] = &[
+    IDX_COORDINATORS_IS_LEADER,
+    IDX_COORDINATORS_STATUS,
+    IDX_COORDINATORS_LAST_HEARTBEAT,
     IDX_PIPELINE_RUNS_STATUS,
     IDX_PIPELINE_RUNS_DEFINITION_ID,
     IDX_PIPELINE_RUNS_CREATED_AT,
@@ -48,6 +54,10 @@ impl MigrationTrait for Migration {
             let schema = Schema::new(DbBackend::Postgres);
 
             manager
+                .create_type(schema.create_enum_from_active_enum::<DbCoordinatorStatus>())
+                .await?;
+
+            manager
                 .create_type(schema.create_enum_from_active_enum::<DbPipelineRunStatus>())
                 .await?;
 
@@ -55,6 +65,47 @@ impl MigrationTrait for Migration {
                 .create_type(schema.create_enum_from_active_enum::<DbTaskStatus>())
                 .await?;
         }
+
+        manager
+            .create_table(
+                Table::create()
+                    .table(Coordinator::Table)
+                    .if_not_exists()
+                    .col(
+                        ColumnDef::new(Coordinator::Id)
+                            .uuid()
+                            .not_null()
+                            .primary_key(),
+                    )
+                    .col(ColumnDef::new(Coordinator::Hostname).text().not_null())
+                    .col(ColumnDef::new(Coordinator::HostPid).integer().not_null())
+                    .col(
+                        ColumnDef::new(Coordinator::IsLeader)
+                            .boolean()
+                            .not_null()
+                            .default(false),
+                    )
+                    .col(
+                        ColumnDef::new(Coordinator::Status)
+                            .custom(DbCoordinatorStatus::name())
+                            .not_null(),
+                    )
+                    .col(ColumnDef::new(Coordinator::Version).text().not_null())
+                    .col(
+                        ColumnDef::new(Coordinator::LastHeartbeat)
+                            .timestamp_with_time_zone()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(Coordinator::StartedAt)
+                            .timestamp_with_time_zone()
+                            .not_null(),
+                    )
+                    .col(ColumnDef::new(Coordinator::TerminatedAt).timestamp_with_time_zone())
+                    .col(ColumnDef::new(Coordinator::Metadata).json_binary())
+                    .to_owned(),
+            )
+            .await?;
 
         manager
             .create_table(
@@ -300,14 +351,36 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(EventLog::EventType).text().not_null())
                     .col(ColumnDef::new(EventLog::Message).text())
                     .col(ColumnDef::new(EventLog::Metadata).json_binary())
-                    .foreign_key(
-                        ForeignKey::create()
-                            .name("fk_event_run")
-                            .from(EventLog::Table, EventLog::RunId)
-                            .to(PipelineRun::Table, PipelineRun::Id)
-                            .on_delete(ForeignKeyAction::Cascade)
-                            .on_update(ForeignKeyAction::Cascade),
-                    )
+                    .to_owned(),
+            )
+            .await?;
+
+        manager
+            .create_index(
+                Index::create()
+                    .name(IDX_COORDINATORS_IS_LEADER)
+                    .table(Coordinator::Table)
+                    .col(Coordinator::IsLeader)
+                    .to_owned(),
+            )
+            .await?;
+
+        manager
+            .create_index(
+                Index::create()
+                    .name(IDX_COORDINATORS_STATUS)
+                    .table(Coordinator::Table)
+                    .col(Coordinator::Status)
+                    .to_owned(),
+            )
+            .await?;
+
+        manager
+            .create_index(
+                Index::create()
+                    .name(IDX_COORDINATORS_LAST_HEARTBEAT)
+                    .table(Coordinator::Table)
+                    .col(Coordinator::LastHeartbeat)
                     .to_owned(),
             )
             .await?;
@@ -496,6 +569,32 @@ impl MigrationTrait for Migration {
             )
             .await?;
 
+        manager
+            .drop_table(
+                Table::drop()
+                    .table(PipelineRun::Table)
+                    .if_exists()
+                    .to_owned(),
+            )
+            .await?;
+        manager
+            .drop_table(
+                Table::drop()
+                    .table(TaskDefinition::Table)
+                    .if_exists()
+                    .to_owned(),
+            )
+            .await?;
+
+        manager
+            .drop_table(
+                Table::drop()
+                    .table(Coordinator::Table)
+                    .if_exists()
+                    .to_owned(),
+            )
+            .await?;
+
         if db_backend == DbBackend::Postgres {
             manager
                 .drop_type(Type::drop().name(DbPipelineRunStatus::name()).to_owned())
@@ -503,6 +602,10 @@ impl MigrationTrait for Migration {
 
             manager
                 .drop_type(Type::drop().name(DbTaskStatus::name()).to_owned())
+                .await?;
+
+            manager
+                .drop_type(Type::drop().name(DbCoordinatorStatus::name()).to_owned())
                 .await?;
         }
 

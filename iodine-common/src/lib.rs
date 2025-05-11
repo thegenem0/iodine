@@ -1,7 +1,9 @@
 pub mod code_registry;
 pub mod common;
+pub mod coordinator;
 pub mod error;
 pub mod event;
+pub mod launcher;
 pub mod pipeline;
 pub mod state;
 pub mod task;

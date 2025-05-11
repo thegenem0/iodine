@@ -18,18 +18,10 @@ pub struct CoordinatorConfig {
     pub max_launchers: usize,
 }
 
-pub enum CoordinatorCommand {
-    SubmitPipeline {
-        pipeline_id: Uuid,
-        run_id_override: Option<Uuid>,
-        /// Send `pipeline_id` or `Error` back to the caller
-        response_oneshot: oneshot::Sender<Result<Uuid, Error>>,
-    },
-    CancelPipelineRun {
-        pipeline_id: Uuid,
-        run_id: Uuid,
-        /// Send `Ok` or `Error` back to the caller
-        response_oneshot: oneshot::Sender<Result<(), Error>>,
+pub enum SupervisorCommand {
+    InitiateShutdown {
+        /// Channel to ack the supervisor command.
+        ack_channel: oneshot::Sender<bool>,
     },
 }
 

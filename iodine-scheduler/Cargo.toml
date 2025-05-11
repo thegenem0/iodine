@@ -5,6 +5,8 @@ edition = "2024"
 
 [dependencies]
 iodine-common = { workspace = true }
+iodine-persistence-pg = { workspace = true }
+iodine-api-graphql = { workspace = true }
 
 async-trait = { workspace = true }
 uuid = { workspace = true }
@@ -12,5 +14,6 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true }
 futures = { workspace = true }
+hostname = "0.4.1"
 
 

@@ -9,12 +9,15 @@ use iodine_common::{
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
+use crate::resource_manager::default::ResourceManager;
+
 use super::{LauncherCommand, LauncherConfig, LauncherStatus, PipelineExecutionGraph};
 
 pub struct Launcher {
     pub id: Uuid,
     pub config: LauncherConfig,
     pub state_manager: Arc<dyn DatabaseTrait>,
+    pub resource_managers: Arc<HashMap<Uuid, Arc<dyn ResourceManager>>>,
     command_rx: mpsc::Receiver<LauncherCommand>,
     status_tx: mpsc::Sender<LauncherStatus>,
     current_pipeline_id: Option<Uuid>,
@@ -28,6 +31,7 @@ impl Launcher {
         id: Uuid,
         config: LauncherConfig,
         state_manager: Arc<dyn DatabaseTrait>,
+        resource_managers: Arc<HashMap<Uuid, Arc<dyn ResourceManager>>>,
         command_rx: mpsc::Receiver<LauncherCommand>,
         status_tx: mpsc::Sender<LauncherStatus>,
     ) -> Self {
@@ -35,6 +39,7 @@ impl Launcher {
             id,
             config,
             state_manager,
+            resource_managers,
             command_rx,
             status_tx,
             current_pipeline_id: None,

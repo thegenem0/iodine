@@ -23,8 +23,6 @@ pub struct Model {
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
 pub enum Relation {
-    #[sea_orm(has_many = "super::event_log::Entity")]
-    EventLog,
     #[sea_orm(
         belongs_to = "super::pipeline_definitions::Entity",
         from = "Column::DefinitionId",
@@ -35,12 +33,6 @@ pub enum Relation {
     PipelineDefinitions,
     #[sea_orm(has_many = "super::task_instances::Entity")]
     TaskInstances,
-}
-
-impl Related<super::event_log::Entity> for Entity {
-    fn to() -> RelationDef {
-        Relation::EventLog.def()
-    }
 }
 
 impl Related<super::pipeline_definitions::Entity> for Entity {

@@ -2,6 +2,7 @@
 
 pub mod prelude;
 
+pub mod coordinators;
 pub mod event_log;
 pub mod pipeline_definitions;
 pub mod pipeline_runs;

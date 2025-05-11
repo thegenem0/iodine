@@ -1,8 +1,9 @@
 use crate::entities::{
-    event_log, pipeline_definitions, pipeline_runs, sea_orm_active_enums, task_definitions,
-    task_dependencies, task_instances,
+    coordinators, event_log, pipeline_definitions, pipeline_runs, sea_orm_active_enums,
+    task_definitions, task_dependencies, task_instances,
 };
 use iodine_common::{
+    coordinator::{Coordinator, CoordinatorStatus},
     error::Error,
     event::{EventLogRecord, EventType},
     pipeline::{PipelineBackend, PipelineDefinition, PipelineInfo, PipelineRun, PipelineRunStatus},
@@ -14,11 +15,53 @@ use sea_orm::{
     sea_query::{Alias, SimpleExpr},
 };
 
+const COORDINATOR_STATUS_DB_ENUM_NAME: &str = "coordinator_status";
 const PIPELINE_RUN_STATUS_DB_ENUM_NAME: &str = "pipeline_run_status";
 const TASK_STATUS_DB_ENUM_NAME: &str = "task_status";
 
 pub(crate) fn db_error_to_domain(e: DbErr) -> Error {
     Error::Database(e.to_string())
+}
+
+pub(crate) fn coordinator_to_domain(model: coordinators::Model) -> Coordinator {
+    Coordinator {
+        id: model.id,
+        hostname: model.hostname,
+        host_pid: model.host_pid,
+        is_leader: model.is_leader,
+        status: coordinator_status_to_domain(model.status),
+        version: model.version,
+        last_heartbeat: model.last_heartbeat.into(),
+        started_at: model.started_at.into(),
+        terminated_at: model.terminated_at.map(|t| t.into()),
+        metadata: model.metadata,
+    }
+}
+
+pub(crate) fn coordinator_status_to_domain(
+    model: sea_orm_active_enums::CoordinatorStatus,
+) -> CoordinatorStatus {
+    match model {
+        sea_orm_active_enums::CoordinatorStatus::Pending => CoordinatorStatus::Pending,
+        sea_orm_active_enums::CoordinatorStatus::Running => CoordinatorStatus::Running,
+        sea_orm_active_enums::CoordinatorStatus::Terminating => CoordinatorStatus::Terminating,
+        sea_orm_active_enums::CoordinatorStatus::Terminated => CoordinatorStatus::Terminated,
+    }
+}
+
+pub(crate) fn domain_coordinator_status_to_db(
+    model: CoordinatorStatus,
+) -> sea_orm_active_enums::CoordinatorStatus {
+    match model {
+        CoordinatorStatus::Pending => sea_orm_active_enums::CoordinatorStatus::Pending,
+        CoordinatorStatus::Running => sea_orm_active_enums::CoordinatorStatus::Running,
+        CoordinatorStatus::Terminating => sea_orm_active_enums::CoordinatorStatus::Terminating,
+        CoordinatorStatus::Terminated => sea_orm_active_enums::CoordinatorStatus::Terminated,
+    }
+}
+
+pub(crate) fn coordinator_status_as_expr(model: CoordinatorStatus) -> SimpleExpr {
+    Expr::val(model.to_string()).cast_as(Alias::new(COORDINATOR_STATUS_DB_ENUM_NAME))
 }
 
 pub(crate) fn pipeline_definition_to_domain(
