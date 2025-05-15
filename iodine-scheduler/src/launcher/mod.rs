@@ -1,6 +1,7 @@
 use std::{collections::HashMap, sync::Arc};
 
 use iodine_common::pipeline::PipelineDefinition;
+use tokio::sync::oneshot;
 use uuid::Uuid;
 
 pub mod default;
@@ -27,5 +28,7 @@ pub enum LauncherCommand {
     ExecutePipeline {
         pipeline_definition: Arc<PipelineDefinition>,
     },
-    Terminate,
+    Terminate {
+        ack_chan: oneshot::Sender<bool>,
+    },
 }

@@ -2,6 +2,7 @@
 
 pub use super::coordinators::Entity as Coordinators;
 pub use super::event_log::Entity as EventLog;
+pub use super::launchers::Entity as Launchers;
 pub use super::pipeline_definitions::Entity as PipelineDefinitions;
 pub use super::pipeline_runs::Entity as PipelineRuns;
 pub use super::task_definitions::Entity as TaskDefinitions;

@@ -4,7 +4,7 @@ use sea_orm_migration::{
 };
 
 use crate::db_entities::{
-    Coordinator, DbCoordinatorStatus, DbPipelineRunStatus, DbTaskStatus, EventLog,
+    Coordinator, DbCoordinatorStatus, DbPipelineRunStatus, DbTaskStatus, EventLog, Launcher,
     PipelineDefinition, PipelineRun, TaskDefinition, TaskDependency, TaskInstance,
 };
 
@@ -103,6 +103,25 @@ impl MigrationTrait for Migration {
                     )
                     .col(ColumnDef::new(Coordinator::TerminatedAt).timestamp_with_time_zone())
                     .col(ColumnDef::new(Coordinator::Metadata).json_binary())
+                    .to_owned(),
+            )
+            .await?;
+
+        manager
+            .create_table(
+                Table::create()
+                    .table(Launcher::Table)
+                    .if_not_exists()
+                    .primary_key(
+                        Index::create()
+                            .col(Launcher::Id)
+                            .col(Launcher::CoordinatorId),
+                    )
+                    .col(ColumnDef::new(Launcher::Id).uuid().not_null())
+                    .col(ColumnDef::new(Launcher::CoordinatorId).uuid().not_null())
+                    .col(ColumnDef::new(Launcher::AssignedPipelineId).uuid())
+                    .col(ColumnDef::new(Launcher::StartedAt).timestamp_with_time_zone())
+                    .col(ColumnDef::new(Launcher::TerminatedAt).timestamp_with_time_zone())
                     .to_owned(),
             )
             .await?;
@@ -584,6 +603,10 @@ impl MigrationTrait for Migration {
                     .if_exists()
                     .to_owned(),
             )
+            .await?;
+
+        manager
+            .drop_table(Table::drop().table(Launcher::Table).if_exists().to_owned())
             .await?;
 
         manager

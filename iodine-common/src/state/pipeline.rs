@@ -6,7 +6,7 @@ use uuid::Uuid;
 use crate::{
     error::{Error, WorkerError},
     pipeline::{PipelineDefinition, PipelineInfo, PipelineRun, PipelineRunStatus},
-    task::{TaskDefinition, TaskDependency},
+    task::TaskDefinition,
 };
 
 use super::base::BaseDbTrait;
@@ -48,12 +48,7 @@ pub trait PipelineDbTrait: BaseDbTrait {
     /// ---
     /// Only stores the information in the DB
     /// It `DOES NOT!` run or schedule the pipeline
-    async fn register_pipeline(
-        &self,
-        definition: &PipelineDefinition,
-        tasks: &[TaskDefinition],
-        dependencies: &[TaskDependency],
-    ) -> Result<(), Error>;
+    async fn register_pipeline(&self, definition: &PipelineDefinition) -> Result<(), Error>;
 
     /// Deregisters a pipeline by `pipeline_id`
     /// ---

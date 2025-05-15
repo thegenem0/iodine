@@ -4,6 +4,7 @@ pub mod prelude;
 
 pub mod coordinators;
 pub mod event_log;
+pub mod launchers;
 pub mod pipeline_definitions;
 pub mod pipeline_runs;
 pub mod sea_orm_active_enums;

@@ -1,6 +1,6 @@
 use crate::{
     db::PostgresStateDb,
-    entities::coordinators,
+    entities::{coordinators, launchers},
     event_logging::{log_event_direct, log_event_in_txn},
     mapping::{
         coordinator_status_as_expr, coordinator_to_domain, db_error_to_domain,
@@ -92,7 +92,7 @@ impl CoordinatorDbTrait for PostgresStateDb {
     ) -> Result<(), Error> {
         let txn = self.conn.begin().await.map_err(db_error_to_domain)?;
 
-        let update_res = coordinators::Entity::update_many()
+        let mut update_query = coordinators::Entity::update_many()
             .col_expr(
                 coordinators::Column::Status,
                 coordinator_status_as_expr(status),
@@ -101,9 +101,21 @@ impl CoordinatorDbTrait for PostgresStateDb {
                 coordinators::Column::LastHeartbeat,
                 Expr::current_timestamp().into(),
             )
-            .filter(coordinators::Column::Id.eq(id))
-            .exec(&txn)
-            .await;
+            .filter(coordinators::Column::Id.eq(id));
+
+        match status {
+            CoordinatorStatus::Terminated => {
+                update_query = update_query.col_expr(
+                    coordinators::Column::TerminatedAt,
+                    Expr::current_timestamp().into(),
+                );
+            }
+            _ => {
+                // TODO(thegenem0):
+            }
+        }
+
+        let update_res = update_query.exec(&txn).await;
 
         match update_res {
             Ok(res) if res.rows_affected > 0 => {
@@ -178,10 +190,115 @@ impl CoordinatorDbTrait for PostgresStateDb {
 
     async fn assign_pipeline_to_launcher(
         &self,
-        _launcher_id: Uuid,
-        _pipeline_id: Uuid,
+        coordinator_id: Uuid,
+        launcher_id: Uuid,
+        pipeline_id: Uuid,
         _run_id_override: Option<Uuid>,
     ) -> Result<(), Error> {
-        todo!()
+        let now: DateTime<FixedOffset> = Utc::now().into();
+        let txn = self.conn.begin().await.map_err(db_error_to_domain)?;
+
+        let insert_launcher_res = launchers::Entity::insert(launchers::ActiveModel {
+            id: Set(launcher_id),
+            coordinator_id: Set(coordinator_id),
+            assigned_pipeline_id: Set(Some(pipeline_id)),
+            started_at: Set(Some(now)),
+            terminated_at: Set(None),
+        })
+        .exec(&txn)
+        .await;
+
+        if let Err(db_err) = insert_launcher_res {
+            txn.rollback().await.map_err(db_error_to_domain)?;
+
+            log_event_direct(
+                &self.conn,
+                Some(coordinator_id),
+                Some(launcher_id),
+                EventType::EngineEvent,
+                Some(format!("Failed to insert launcher: {}", db_err)),
+                None,
+            )
+            .await?;
+
+            return Err(db_error_to_domain(db_err));
+        }
+
+        txn.commit().await.map_err(db_error_to_domain)?;
+
+        Ok(())
+    }
+
+    async fn terminate_launcher(
+        &self,
+        coordinator_id: Uuid,
+        launcher_id: Uuid,
+    ) -> Result<(), Error> {
+        let now: DateTime<FixedOffset> = Utc::now().into();
+        let txn = self.conn.begin().await.map_err(db_error_to_domain)?;
+
+        let update_launcher_res = launchers::Entity::update_many()
+            .col_expr(launchers::Column::TerminatedAt, Expr::value(Some(now)))
+            .filter(launchers::Column::Id.eq(launcher_id))
+            .filter(launchers::Column::CoordinatorId.eq(coordinator_id))
+            .exec(&txn)
+            .await;
+
+        match update_launcher_res {
+            Ok(res) if res.rows_affected > 0 => {
+                if let Err(db_err) = log_event_in_txn(
+                    &txn,
+                    Some(launcher_id),
+                    None,
+                    EventType::EngineEvent,
+                    None,
+                    None,
+                )
+                .await
+                {
+                    txn.rollback().await.map_err(db_error_to_domain)?;
+                    log_event_direct(
+                        &self.conn,
+                        Some(launcher_id),
+                        None,
+                        EventType::EngineEvent,
+                        Some(format!(
+                            "Failed to log launcher termination event for launcher {}: {}",
+                            launcher_id, db_err
+                        )),
+                        None,
+                    )
+                    .await?;
+                    return Err(db_error_to_domain(db_err));
+                }
+
+                txn.commit().await.map_err(db_error_to_domain)?;
+
+                return Ok(());
+            }
+            Ok(_) => {
+                txn.rollback().await.map_err(db_error_to_domain)?;
+
+                Err(Error::NotFound {
+                    resource_type: "Launcher".into(),
+                    resource_id: launcher_id.to_string(),
+                })
+            }
+            Err(db_err) => {
+                txn.rollback().await.map_err(db_error_to_domain)?;
+
+                log_event_direct(
+                    &self.conn,
+                    Some(launcher_id),
+                    None,
+                    EventType::EngineEvent,
+                    Some(format!("Failed to terminate launcher: {}", db_err)),
+                    None,
+                )
+                .await?;
+
+                Err(db_error_to_domain(db_err))
+            }
+        }
     }
 }

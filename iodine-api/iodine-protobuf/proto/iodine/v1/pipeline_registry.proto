@@ -1,13 +1,26 @@
 syntax = "proto3";
 
-package iodine_proto.v1;
+package iodine.v1;
 
 import "google/protobuf/struct.proto";
-import "iodine_proto/v1/common.proto";
+import "iodine/v1/common.proto";
 
 service PipelineRegistryService {
+  rpc GetRegistryMetadata(GetRegistryMetadataRequest)
+      returns (GetRegistryMetadataResponse);
+
   rpc GetPipelineDefinitions(GetPipelineDefinitionsRequest)
       returns (GetPipelineDefinitionsResponse);
+}
+
+message GetRegistryMetadataRequest {
+  string engine_version = 1;
+  google.protobuf.Struct request_metadata = 2;
+}
+
+message GetRegistryMetadataResponse {
+  string registry_id = 1;
+  google.protobuf.Struct registry_metadata = 2;
 }
 
 message GetPipelineDefinitionsRequest {

@@ -1,4 +1,4 @@
-use std::{net::SocketAddr, sync::Arc};
+use std::{any::TypeId, net::SocketAddr, sync::Arc};
 
 use async_graphql::{EmptySubscription, Schema};
 use async_graphql_axum::{GraphQLRequest, GraphQLResponse};
@@ -7,8 +7,10 @@ use axum::{
     response::{Html, IntoResponse},
     routing::{get, post},
 };
-use iodine_common::{coordinator::CoordinatorCommand, error::Error, state::DatabaseTrait};
-use tokio::{net::TcpListener, sync::mpsc, task::JoinHandle};
+use iodine_common::{
+    command::CommandRouter, coordinator::CoordinatorCommand, error::Error, state::DatabaseTrait,
+};
+use tokio::{net::TcpListener, task::JoinHandle};
 use tower_http::cors::Any;
 
 use crate::gql_ops::coordinator::{MutationRoot, QueryRoot};
@@ -17,19 +19,19 @@ pub type AppSchema = Schema<QueryRoot, MutationRoot, EmptySubscription>;
 
 pub struct ContextData {
     pub db: Arc<dyn DatabaseTrait>,
-    pub coordinator_cmd_tx: mpsc::Sender<CoordinatorCommand>,
+    pub command_router: Arc<CommandRouter>,
 }
 
 pub struct GraphQLServer {
     db: Arc<dyn DatabaseTrait>,
-    coordinator_cmd_tx: mpsc::Sender<CoordinatorCommand>,
+    command_router: Arc<CommandRouter>,
     listen_addr: SocketAddr,
 }
 
 impl GraphQLServer {
     pub fn new(
         db: Arc<dyn DatabaseTrait>,
-        coordinator_cmd_tx: mpsc::Sender<CoordinatorCommand>,
+        command_router: Arc<CommandRouter>,
         listen_addr: String,
     ) -> Result<Self, Error> {
         let listen_addr: SocketAddr = listen_addr.parse().map_err(|e| {
@@ -41,7 +43,7 @@ impl GraphQLServer {
 
         Ok(Self {
             db,
-            coordinator_cmd_tx,
+            command_router,
             listen_addr,
         })
     }
@@ -49,7 +51,7 @@ impl GraphQLServer {
     pub async fn serve(&self) -> Result<JoinHandle<()>, Error> {
         let ctx_data = ContextData {
             db: Arc::clone(&self.db),
-            coordinator_cmd_tx: self.coordinator_cmd_tx.clone(),
+            command_router: Arc::clone(&self.command_router),
         };
 
         let listen_addr = self.listen_addr;

@@ -32,8 +32,15 @@ pub trait CoordinatorDbTrait: BaseDbTrait {
 
     async fn assign_pipeline_to_launcher(
         &self,
+        coordinator_id: Uuid,
         launcher_id: Uuid,
         pipeline_id: Uuid,
         run_id_override: Option<Uuid>,
+    ) -> Result<(), Error>;
+
+    async fn terminate_launcher(
+        &self,
+        coordinator_id: Uuid,
+        launcher_id: Uuid,
     ) -> Result<(), Error>;
 }

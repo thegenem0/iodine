@@ -1,14 +1,34 @@
-pub fn add(left: u64, right: u64) -> u64 {
-    left + right
-}
+pub mod client;
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
-    }
-}
+// use tonic::{Request, Response, Status};
+// use uuid::Uuid;
+//
+// #[derive(Debug, Clone)]
+// pub struct CodeServerConfig {
+//     pub registry_id: Uuid,
+//     pub language: String,
+//     pub args: Vec<String>,
+//     pub workdir: String,
+//     pub registry_version: Option<String>,
+// }
+//
+// #[derive(Debug)]
+// pub struct GrpcCodeServerService {
+//     config: CodeServerConfig,
+// }
+//
+// impl GrpcCodeServerService {
+//     pub fn new(config: CodeServerConfig) -> Self {
+//         Self { config }
+//     }
+// }
+//
+// #[tonic::async_trait]
+// impl PipelineRegistryService for GrpcCodeServerService {
+//     async fn get_pipeline_definitions(
+//         &self,
+//         _request: Request<GetPipelineDefinitionsRequest>,
+//     ) -> Result<Response<GetPipelineDefinitionsResponse>, Status> {
+//         todo!()
+//     }
+// }

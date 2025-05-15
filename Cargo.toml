@@ -1,11 +1,14 @@
 [workspace]
 resolver = "2"
-members = [ "iodine-api/iodine-api-graphql", "iodine-api/iodine-api-grpc","iodine-common", "iodine-scheduler", "iodine-state/iodine-migration", "iodine-state/iodine-persistence-pg"]
+members = [ "iodine-api/iodine-api-graphql", "iodine-api/iodine-api-grpc", "iodine-api/iodine-protobuf", "iodine-common", "iodine-registry", "iodine-scheduler", "iodine-state/iodine-migration", "iodine-state/iodine-persistence-pg"]
 
 [workspace.dependencies]
 iodine-common = { path = "iodine-common" }
+iodine-protobuf = { path = "iodine-api/iodine-protobuf" }
 iodine-persistence-pg = { path = "iodine-state/iodine-persistence-pg" }
 iodine-api-graphql = { path = "iodine-api/iodine-api-graphql" }
+iodine-api-grpc = { path = "iodine-api/iodine-api-grpc" }
+
 
 tokio = { version = "1", features = ["full"] }
 uuid = { version = "1.16.0", features = ["v4", "serde"] }
@@ -32,3 +35,7 @@ rand = "0.9.1"
 sea-orm-migration = "1.1.0"
 tower-http = "0.6.2"
 futures = "0.3.31"
+hostname = "0.4.1"
+serde_yaml = "0.9.34"
+tonic-types = "0.13.1"
+clap = "4.5.38"

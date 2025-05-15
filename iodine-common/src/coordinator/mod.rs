@@ -19,6 +19,7 @@ pub struct Coordinator {
     pub metadata: Option<serde_json::Value>,
 }
 
+#[non_exhaustive]
 pub enum CoordinatorCommand {
     SubmitPipeline {
         pipeline_id: Uuid,
@@ -31,6 +32,9 @@ pub enum CoordinatorCommand {
         run_id: Uuid,
         /// Send `Ok` or `Error` back to the caller
         response_oneshot: oneshot::Sender<Result<(), Error>>,
+    },
+    Terminate {
+        ack_chan: oneshot::Sender<bool>,
     },
 }
 

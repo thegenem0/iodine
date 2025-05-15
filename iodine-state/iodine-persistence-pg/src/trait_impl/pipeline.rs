@@ -5,7 +5,7 @@ use chrono::{DateTime, FixedOffset, Utc};
 use iodine_common::error::WorkerError;
 use iodine_common::event::EventType;
 use iodine_common::pipeline::PipelineInfo;
-use iodine_common::task::{TaskDefinition, TaskDependency, TaskStatus};
+use iodine_common::task::{TaskDefinition, TaskStatus};
 use iodine_common::{
     error::Error,
     pipeline::{PipelineDefinition, PipelineRun, PipelineRunStatus},
@@ -128,12 +128,7 @@ impl PipelineDbTrait for PostgresStateDb {
         ))
     }
 
-    async fn register_pipeline(
-        &self,
-        definition: &PipelineDefinition,
-        tasks: &[TaskDefinition],
-        dependencies: &[TaskDependency],
-    ) -> Result<(), Error> {
+    async fn register_pipeline(&self, definition: &PipelineDefinition) -> Result<(), Error> {
         let txn = self.conn.begin().await.map_err(db_error_to_domain)?;
         let def_id = definition.info.id;
 
@@ -186,7 +181,8 @@ impl PipelineDbTrait for PostgresStateDb {
             }
         };
 
-        let taks_inserts: Vec<task_definitions::ActiveModel> = tasks
+        let taks_inserts: Vec<task_definitions::ActiveModel> = definition
+            .task_definitions
             .iter()
             .map(|task| task_definitions::ActiveModel {
                 id: Set(task.id),
@@ -206,7 +202,8 @@ impl PipelineDbTrait for PostgresStateDb {
                 .map_err(db_error_to_domain)?;
         }
 
-        let dep_inserts: Vec<task_dependencies::ActiveModel> = dependencies
+        let dep_inserts: Vec<task_dependencies::ActiveModel> = definition
+            .task_dependencies
             .iter()
             .map(|dep| task_dependencies::ActiveModel {
                 pipeline_id: Set(dep.pipeline_id),
@@ -227,8 +224,8 @@ impl PipelineDbTrait for PostgresStateDb {
         let message = format!(
             "Registered pipeline definition with id {}, {} nodes and {} dependencies",
             definition.info.id,
-            tasks.len(),
-            dependencies.len()
+            definition.task_definitions.len(),
+            definition.task_dependencies.len()
         );
 
         log_event_in_txn(&txn, None, None, update_event, Some(message), None)

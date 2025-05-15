@@ -1,16 +1,18 @@
 use std::{collections::HashMap, process, sync::Arc};
 
 use futures::{StreamExt, stream::FuturesUnordered};
+use iodine_api_grpc::client::GrpcClient;
 use iodine_common::{
+    command::CommandRouter,
     coordinator::{CoordinatorCommand, CoordinatorStatus},
     error::Error,
     state::DatabaseTrait,
 };
-use tokio::sync::{Mutex, RwLock, mpsc, oneshot};
+use tokio::sync::{RwLock, oneshot};
 use uuid::Uuid;
 
 use crate::{
-    launcher::{LauncherConfig, LauncherStatus, default::Launcher},
+    launcher::{LauncherCommand, LauncherConfig, LauncherStatus, default::Launcher},
     resource_manager::default::ResourceManager,
 };
 
@@ -22,6 +24,9 @@ pub struct Coordinator {
 
     /// Coordinator configuration.
     pub config: CoordinatorConfig,
+
+    /// Command router for dispatching commands to handlers.
+    pub command_router: Arc<CommandRouter>,
 
     /// State manager for accessing the database.
     pub state_manager: Arc<dyn DatabaseTrait>,
@@ -44,45 +49,26 @@ pub struct Coordinator {
     /// of RunLauncher tokio tasks.
     laucher_lifecycles: FuturesUnordered<MonitoredLauncherTask>,
 
-    /// Central status Receiver for all RunLauncher tasks.
-    /// This is used to send status updates to the coordinator.
-    launcher_status_rx: Arc<Mutex<mpsc::Receiver<LauncherStatus>>>,
-
-    /// Status Sender for all RunLauncher tasks.
-    /// This is cloned into each new RunLauncher task,
-    /// and is where updates should be sent.
-    launcher_status_tx_template: mpsc::Sender<LauncherStatus>,
-
-    /// Receiver for commands to the coordinator.
-    /// This is used to send requests received from the API,
-    /// and send commands to the coordinator to act on those requests.
-    api_command_rx: mpsc::Receiver<CoordinatorCommand>,
-
-    /// Receiver for commands from the global supervisor.
-    /// This is used to send commands to the coordinator to act on those requests.
-    supervisor_command_rx: mpsc::Receiver<SupervisorCommand>,
+    grpc_client: Arc<GrpcClient>,
 }
 
 impl Coordinator {
-    pub fn new(
+    pub async fn new(
         config: CoordinatorConfig,
+        command_router: Arc<CommandRouter>,
         state_manager: Arc<dyn DatabaseTrait>,
         resource_managers: Arc<HashMap<Uuid, Arc<dyn ResourceManager>>>,
-        api_command_rx: mpsc::Receiver<CoordinatorCommand>,
-        supervisor_command_rx: mpsc::Receiver<SupervisorCommand>,
+        grpc_client: Arc<GrpcClient>,
     ) -> Self {
-        let (status_tx, status_rx) = mpsc::channel(config.max_launchers * 2);
         Self {
             id: Uuid::new_v4(),
             config,
+            command_router,
             state_manager,
             resource_managers,
             active_launchers: Arc::new(RwLock::new(HashMap::new())),
             laucher_lifecycles: FuturesUnordered::new(),
-            launcher_status_rx: Arc::new(Mutex::new(status_rx)),
-            launcher_status_tx_template: status_tx.clone(),
-            api_command_rx,
-            supervisor_command_rx,
+            grpc_client,
         }
     }
 
@@ -97,6 +83,45 @@ impl Coordinator {
         self.state_manager
             .create_new_coordinator(self.id, hostname, pid, "v0.1".to_string(), None)
             .await?;
+
+        // register command handlers
+        self.command_router
+            .register_singleton_handler::<CoordinatorCommand>()
+            .await?;
+
+        self.command_router
+            .register_singleton_handler::<LauncherStatus>()
+            .await?;
+
+        // grab receivers for handlers needed by this coordinator
+        let mut api_command_rx = self
+            .command_router
+            .subscribe::<CoordinatorCommand>(None)
+            .await?;
+
+        let mut supervisor_command_rx = self
+            .command_router
+            .subscribe::<SupervisorCommand>(None)
+            .await?;
+
+        let mut launcher_status_rx = self
+            .command_router
+            .subscribe::<LauncherStatus>(None)
+            .await?;
+
+        let registries = self.grpc_client.get_metadata().await?;
+        let (registry_id, _) = registries.first().ok_or(Error::Internal(
+            "No registries found in gRPC client".to_string(),
+        ))?;
+
+        let pipeline_defs = self
+            .grpc_client
+            .get_pipeline_definitions(*registry_id)
+            .await?;
+
+        for pipeline_def in pipeline_defs {
+            self.state_manager.register_pipeline(&pipeline_def).await?;
+        }
 
         // TODO(thegenem0):
         // Let's do some:
@@ -115,15 +140,19 @@ impl Coordinator {
 
         loop {
             tokio::select! {
-                Some(command) = self.supervisor_command_rx.recv() => {
+                Some(command) = supervisor_command_rx.recv() => {
                     match command {
-                        SupervisorCommand::InitiateShutdown { ack_channel } => {
-                            self.handle_coordinator_teardown(Some(ack_channel)).await?;
+                        SupervisorCommand::Terminate { ack_chan }=> {
+                            if (self.handle_coordinator_teardown().await).is_err() {
+                                let _ = ack_chan.send(false);
+                            } else {
+                                let _ = ack_chan.send(true);
+                            }
                             return Ok(());
                         }
                     }
                 },
-                Some(command) = self.api_command_rx.recv() => {
+                Some(command) = api_command_rx.recv() => {
                     match command {
                         CoordinatorCommand::SubmitPipeline { pipeline_id, run_id_override, response_oneshot } => {
                             println!("Coordinator received SubmitPipeline command for pipeline {}", pipeline_id);
@@ -158,17 +187,19 @@ impl Coordinator {
                             let _ = response_oneshot.send(Ok(pipeline_id));
                         }
                         CoordinatorCommand::CancelPipelineRun { pipeline_id, run_id, response_oneshot } => unimplemented!(),
+                        CoordinatorCommand::Terminate { ack_chan } => {
+                                if (self.handle_coordinator_teardown().await).is_err() {
+                                    let _ = ack_chan.send(false);
+                                } else {
+                                    let _ = ack_chan.send(true);
+                                }
+
+                            },
+                            _ => todo!("Handle coordinator command"),
                     }
                 },
-                maybe_status_update = async {
-                    // Acquire lock outside of if let, guard lives for the scope of this async block
-                    let mut guard = self.launcher_status_rx.lock().await;
-
-                    // The guard is held until recv() completes or the async block is dropped.
-                    guard.recv().await
-                } => {
-                    if let Some(status) = maybe_status_update {
-                        match status {
+                Some(status) = launcher_status_rx.recv() => {
+                    match status {
                             LauncherStatus::Initializing => todo!("Handle Initializing"),
                             LauncherStatus::Running => todo!("Handle Running"),
                             LauncherStatus::Terminating => todo!("Handle Terminating"),
@@ -178,20 +209,7 @@ impl Coordinator {
                                 todo!("Handle Terminated");
                             }
                         }
-                    } else {
-                        // This else branch is hit if recv() returns None,
-                        // which means the channel is closed (all Senders were dropped).
-                        // This creates a big mess, and the coordinator should
-                        // probably die and restart.
-                        // When in a multi-node deployment, just let it die,
-                        // raft will elect a new leader and restart the coordinator.
-                        eprintln!("Launcher status channel was closed. This happened on the Coordinator side. Solar flare bit-flip???");
 
-                        // Try to gracefully shut down the coordinator.
-                        self.handle_coordinator_teardown(None).await?;
-
-                        return Err(Error::Internal("Launcher status channel closed on Coordinator side".to_string()));
-                    }
                 },
 
                 Some((launcher_id, join_outcome)) = self.laucher_lifecycles.next(), if !self.laucher_lifecycles.is_empty() => {
@@ -233,13 +251,33 @@ impl Coordinator {
         }
     }
 
-    async fn handle_coordinator_teardown(
-        &mut self,
-        ack_channel: Option<oneshot::Sender<bool>>,
-    ) -> Result<(), Error> {
+    async fn handle_coordinator_teardown(&mut self) -> Result<(), Error> {
         self.state_manager
             .update_coordinator_status(self.id, CoordinatorStatus::Terminating)
             .await?;
+
+        let mut errored_launchers = Vec::new();
+
+        for (launcher_id, _) in self.active_launchers.read().await.iter() {
+            let (ack_tx, ack_rx) = oneshot::channel::<bool>();
+            self.command_router
+                .dispatch(
+                    LauncherCommand::Terminate { ack_chan: ack_tx },
+                    Some(*launcher_id),
+                )
+                .await?;
+
+            if ack_rx.await.is_err() {
+                errored_launchers.push(*launcher_id);
+            }
+        }
+
+        if !errored_launchers.is_empty() {
+            return Err(Error::Internal(format!(
+                "Failed to terminate {} launchers",
+                errored_launchers.len()
+            )));
+        }
 
         // TODO(thegenem0):
         // This is where we should do some cleanup.
@@ -253,36 +291,32 @@ impl Coordinator {
             .update_coordinator_status(self.id, CoordinatorStatus::Terminated)
             .await?;
 
-        // Acknowledge the supervisor command.
-        // This signals that the command was received and processed.
-        if let Some(ack_channel) = ack_channel {
-            ack_channel
-                .send(true)
-                .map_err(|_| Error::Internal("Failed to ack supervisor command".to_string()))?;
-        }
-
         Ok(())
     }
 
     async fn spawn_new_run_launcher(&mut self) -> Result<Uuid, Error> {
         println!("Coordinator spawning new run launcher");
         let launcher_id = Uuid::new_v4();
-        let (command_tx, command_rx) = mpsc::channel(10);
+        let coordinator_id = self.id;
 
+        let command_router_clone = Arc::clone(&self.command_router);
         let state_mgr_clone = Arc::clone(&self.state_manager);
         let resource_mgrs_clone = Arc::clone(&self.resource_managers);
-        let status_tx_clone = self.launcher_status_tx_template.clone();
+
+        self.command_router
+            .register_instanced_handler::<LauncherCommand>(launcher_id)
+            .await?;
 
         let launcher_task_handle = tokio::spawn(async move {
             let mut launcher = Launcher::new(
                 launcher_id,
+                coordinator_id,
                 LauncherConfig {
                     config: serde_json::Value::default(),
                 },
+                command_router_clone,
                 state_mgr_clone,
                 resource_mgrs_clone,
-                command_rx,
-                status_tx_clone,
             );
 
             let launcher_run_result = launcher.run_loop().await;
@@ -302,8 +336,8 @@ impl Coordinator {
 
         let managed_launcher = ManagedLauncher {
             id: launcher_id,
-            command_tx,
             current_pipeline_id: None, // We don't have any pipelines assigned yet
+            current_run_id: None,
         };
 
         self.active_launchers
@@ -320,31 +354,48 @@ impl Coordinator {
         pipeline_id: Uuid,
         _run_id_override: Option<Uuid>,
     ) -> Result<(), Error> {
-        let pipeline_def = self
+        let pipeline_def_opt = self
             .state_manager
             .get_pipeline_definition(pipeline_id)
             .await?;
 
-        match pipeline_def {
-            Some(_pipeline_def) => {
-                println!(
-                    "Coordinator assigning pipeline {} to launcher {}",
-                    pipeline_id, launcher_id
-                );
-                // TODO(thegenem0):
-                // Implement this db call
-
-                // self.state_manager
-                //     .assign_pipeline_to_launcher(pipeline_id, launcher_id)
-                //     .await?;
-            }
+        let pipeline_def = match pipeline_def_opt {
+            Some(pipeline_def) => pipeline_def,
             None => {
                 return Err(Error::NotFound {
                     resource_type: "PipelineDefinition".to_string(),
                     resource_id: pipeline_id.to_string(),
                 });
             }
-        }
+        };
+
+        self.state_manager
+            .assign_pipeline_to_launcher(self.id, launcher_id, pipeline_id, None)
+            .await?;
+
+        {
+            let mut active_launchers_wlock = self.active_launchers.write().await;
+            if let Some(mut_launcher) = active_launchers_wlock.get_mut(&launcher_id) {
+                mut_launcher.current_pipeline_id = Some(pipeline_id);
+            } else {
+                eprintln!(
+                    "CRITICAL: Failed to find launcher {} in active_launchers map during assignment.",
+                    launcher_id
+                );
+                return Err(Error::NotFound {
+                    resource_type: "ManagedLauncher".to_string(),
+                    resource_id: launcher_id.to_string(),
+                });
+            }
+        } // Release write lock
+
+        let exec_cmd = LauncherCommand::ExecutePipeline {
+            pipeline_definition: Arc::new(pipeline_def),
+        };
+
+        self.command_router
+            .dispatch(exec_cmd, Some(launcher_id))
+            .await?;
 
         Ok(())
     }

@@ -1,6 +1,6 @@
 syntax = "proto3";
 
-package iodine_proto.v1;
+package iodine.v1;
 
 import "google/protobuf/struct.proto";
 

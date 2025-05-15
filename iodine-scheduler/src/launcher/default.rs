@@ -1,25 +1,25 @@
 use std::{collections::HashMap, sync::Arc};
 
 use iodine_common::{
+    command::CommandRouter,
     error::Error,
     pipeline::{PipelineDefinition, PipelineRunStatus},
     state::DatabaseTrait,
     task::TaskStatus,
 };
-use tokio::sync::mpsc;
 use uuid::Uuid;
 
 use crate::resource_manager::default::ResourceManager;
 
-use super::{LauncherCommand, LauncherConfig, LauncherStatus, PipelineExecutionGraph};
+use super::{LauncherCommand, LauncherConfig, PipelineExecutionGraph};
 
 pub struct Launcher {
     pub id: Uuid,
     pub config: LauncherConfig,
+    pub command_router: Arc<CommandRouter>,
     pub state_manager: Arc<dyn DatabaseTrait>,
     pub resource_managers: Arc<HashMap<Uuid, Arc<dyn ResourceManager>>>,
-    command_rx: mpsc::Receiver<LauncherCommand>,
-    status_tx: mpsc::Sender<LauncherStatus>,
+    coordinator_id: Uuid,
     current_pipeline_id: Option<Uuid>,
     task_states: HashMap<Uuid, String>,
     execution_graph: Option<PipelineExecutionGraph>,
@@ -29,19 +29,19 @@ pub struct Launcher {
 impl Launcher {
     pub fn new(
         id: Uuid,
+        coordinator_id: Uuid,
         config: LauncherConfig,
+        command_router: Arc<CommandRouter>,
         state_manager: Arc<dyn DatabaseTrait>,
         resource_managers: Arc<HashMap<Uuid, Arc<dyn ResourceManager>>>,
-        command_rx: mpsc::Receiver<LauncherCommand>,
-        status_tx: mpsc::Sender<LauncherStatus>,
     ) -> Self {
         Self {
             id,
             config,
+            command_router,
             state_manager,
             resource_managers,
-            command_rx,
-            status_tx,
+            coordinator_id,
             current_pipeline_id: None,
             task_states: HashMap::new(),
             execution_graph: None,
@@ -50,14 +50,25 @@ impl Launcher {
     }
 
     pub async fn run_loop(&mut self) -> Result<(), Error> {
+        let mut command_rx = self
+            .command_router
+            .subscribe::<LauncherCommand>(Some(self.id))
+            .await?;
+
         loop {
             tokio::select! {
-                Some(command) = self.command_rx.recv() => {
+                Some(command) = command_rx.recv() => {
                     match command {
                         LauncherCommand::ExecutePipeline { pipeline_definition } => {
                             self.initialize_pipeline(pipeline_definition).await?;
                         }
-                        LauncherCommand::Terminate => unimplemented!(),
+                        LauncherCommand::Terminate { ack_chan } => {
+                            if (self.teardown_launcher().await).is_err() {
+                                let _ = ack_chan.send(false);
+                            } else {
+                                let _ = ack_chan.send(true);
+                            }
+                        }
                     }
                 },
 
@@ -67,9 +78,18 @@ impl Launcher {
 
     async fn initialize_pipeline(
         &self,
-        _pipeline_definition: Arc<PipelineDefinition>,
+        pipeline_definition: Arc<PipelineDefinition>,
     ) -> Result<(), Error> {
-        todo!()
+        println!(
+            "Launcher {} initializing pipeline {}",
+            self.id, pipeline_definition.info.id
+        );
+
+        println!("Doing some stuff");
+
+        println!("Launcher successfully initialized, ready to execute pipeline.");
+
+        Ok(())
     }
 
     async fn process_execution_cycle(&self) -> Result<Option<PipelineRunStatus>, Error> {
@@ -90,6 +110,16 @@ impl Launcher {
         todo!()
     }
 
+    async fn teardown_launcher(&self) -> Result<(), Error> {
+        println!("Launcher {} shutting down.", self.id);
+
+        self.state_manager
+            .terminate_launcher(self.coordinator_id, self.id)
+            .await?;
+
+        Ok(())
+    }
+
     // pub async fn run_loop(&mut self) -> Result<(), String>
     //     // This loop would:
     //     // 1. Wait for an ExecuteDag command.
@@ -103,9 +133,4 @@ impl Launcher {
     //     //    f. Repeat until DAG completion or failure.
     //     // 4. Send final DAG status to Coordinator via status_sender.
     //     // 5. Clean up internal state and wait for next command.
-
-    // async fn initialize_for_dag(&mut self, dag_run_id: DagRunId, dag_def: Arc<DagDefinition>) -> Result<(), String>
-    // async fn process_dag_execution_cycle(&mut self) -> Result<Option<DagRunStatus>, String> // Returns final status if DAG ended
-    // async fn launch_and_monitor_worker(&self, node_id: NodeId, attempt: u32) -> Result<(), String>
-    // async fn handle_worker_outcome(&mut self, worker_id: WorkerInstanceId, node_id: NodeId, attempt: u32, status: WorkerInstanceStatus) -> Result<(), String>
 }

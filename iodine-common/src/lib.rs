@@ -1,4 +1,5 @@
 pub mod code_registry;
+pub mod command;
 pub mod common;
 pub mod coordinator;
 pub mod error;

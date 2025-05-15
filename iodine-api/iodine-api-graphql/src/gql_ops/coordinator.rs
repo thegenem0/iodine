@@ -60,7 +60,7 @@ impl MutationRoot {
             response_oneshot: response_tx,
         };
 
-        if let Err(send_err) = ctx.coordinator_cmd_tx.send(command).await {
+        if let Err(send_err) = ctx.command_router.dispatch(command, None).await {
             eprintln!(
                 "Failed to send SubmitPipeline command to Coordinator: {}",
                 send_err

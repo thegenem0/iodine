@@ -5,12 +5,10 @@ use std::{
 
 use iodine_common::error::Error;
 use tokio::{
-    sync::{mpsc, oneshot},
+    sync::oneshot,
     task::{JoinError, JoinHandle},
 };
 use uuid::Uuid;
-
-use crate::launcher::LauncherCommand;
 
 pub mod default;
 
@@ -18,17 +16,15 @@ pub struct CoordinatorConfig {
     pub max_launchers: usize,
 }
 
+#[non_exhaustive]
 pub enum SupervisorCommand {
-    InitiateShutdown {
-        /// Channel to ack the supervisor command.
-        ack_channel: oneshot::Sender<bool>,
-    },
+    Terminate { ack_chan: oneshot::Sender<bool> },
 }
 
 pub struct ManagedLauncher {
     id: Uuid,
-    command_tx: mpsc::Sender<LauncherCommand>,
     current_pipeline_id: Option<Uuid>,
+    current_run_id: Option<Uuid>,
 }
 
 pub struct MonitoredLauncherTask {

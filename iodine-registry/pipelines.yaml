@@ -1,0 +1,21 @@
+version: 0.1
+registry_identifier: local_registry_01
+pipelines:
+  - name: Pipeline 1
+    description: This is a pipeline
+    steps:
+      - name: Step 1
+        description: This is a modified step
+        working_directory: ./src
+        entrypoint: python
+        environment:
+          - key: key
+            value: value
+        labels:
+          - key: key
+            value: value
+        executor_config:
+          local_process:
+            cpu_request: 100m
+            memory_request: 100m
+            timeout_seconds: 10

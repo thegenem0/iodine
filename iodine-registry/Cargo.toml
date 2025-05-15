@@ -1,0 +1,20 @@
+[package]
+name = "iodine-registry"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+iodine-common = { workspace = true }
+iodine-protobuf = { workspace = true }
+
+clap = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_yaml = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tonic = { workspace = true }
+tonic-types = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+uuid = { workspace = true, features = ["v4", "v5" ,"serde"] }

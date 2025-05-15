@@ -1,0 +1,29 @@
+version: 0.1
+registry_identifier: local_registry_01
+pipelines:
+  - name: Pipeline 1
+    description: This is a pipeline
+    steps:
+      - name: Step 1
+        description: This is a modified step
+        environment:
+          - key: key
+            value: value
+        labels:
+          - key: key
+            value: value
+        executor_cofig:
+          local_process:
+            cpu_request: 100m
+            memory_request: 100m
+            timeout_seconds: 10
+          docker:
+            image_uri: docker.io/library/ubuntu:latest
+            entrypoint:
+              - /bin/sh -c "echo Hello World"
+            timeout_seconds: 10
+          cloud_run_job:
+            region: us-central1
+            project_id: my-project
+            job_name: my-job
+            timeout_seconds: 10

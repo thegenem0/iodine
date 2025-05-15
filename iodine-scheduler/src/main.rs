@@ -1,9 +1,11 @@
 use std::{collections::HashMap, env, sync::Arc, time::Duration};
 
-use coordinator::{CoordinatorConfig, default::Coordinator};
+use coordinator::{CoordinatorConfig, SupervisorCommand, default::Coordinator};
 use iodine_api_graphql::server::GraphQLServer;
-use iodine_common::state::DatabaseTrait;
+use iodine_api_grpc::client::GrpcClient;
+use iodine_common::{command::CommandRouter, state::DatabaseTrait};
 use iodine_persistence_pg::db::PostgresStateDb;
+use tokio::{sync::oneshot, task::JoinHandle};
 
 #[allow(dead_code)]
 mod coordinator;
@@ -22,14 +24,16 @@ async fn main() {
 
     let db_arc: Arc<dyn DatabaseTrait> = Arc::new(state_db);
 
-    let (coordinator_cmd_tx, coordinator_cmd_rx) = tokio::sync::mpsc::channel(10);
+    let cmd_router = Arc::new(CommandRouter::new(None, None));
 
-    // Supervisor command channels
-    let (supervisor_cmd_tx, supervisor_cmd_rx) = tokio::sync::mpsc::channel(1);
+    cmd_router
+        .register_singleton_handler::<SupervisorCommand>()
+        .await
+        .expect("Failed to register SupervisorCommand handler");
 
     let gql_server = GraphQLServer::new(
         db_arc.clone(),
-        coordinator_cmd_tx,
+        cmd_router.clone(),
         "0.0.0.0:8080".to_string(),
     )
     .expect("Failed to start GraphQL server");
@@ -39,13 +43,18 @@ async fn main() {
         .await
         .expect("Failed to start GraphQL server");
 
+    let grpc_client = GrpcClient::new(vec!["http://localhost:50051".to_string()])
+        .await
+        .expect("Failed to create gRPC client");
+
     let mut coordinator = Coordinator::new(
         CoordinatorConfig { max_launchers: 10 },
+        cmd_router.clone(),
         db_arc.clone(),
         Arc::new(HashMap::new()),
-        coordinator_cmd_rx,
-        supervisor_cmd_rx,
-    );
+        Arc::new(grpc_client),
+    )
+    .await;
 
     tokio::spawn(async move {
         coordinator.run_main_loop().await.unwrap();
@@ -56,24 +65,115 @@ async fn main() {
     // - Spawn separate task for waiting on the ack
     // - Keep main task alive and free to handle other stuff
 
-    tokio::select! {
-        biased;
-        _ = tokio::signal::ctrl_c() => {
-            let (coord_ack_tx, coord_ack_rx) = tokio::sync::oneshot::channel::<bool>();
+    let mut is_shutting_down = false;
+    let mut master_shutdown_rx: Option<oneshot::Receiver<()>> = None;
 
-            if supervisor_cmd_tx.send(coordinator::SupervisorCommand::InitiateShutdown{ ack_channel: coord_ack_tx }).await.is_err() {
-                eprintln!("Failed to send shutdown command to Coordinator. It might have already stopped.");
-            }
+    'main_loop: loop {
+        if is_shutting_down {
+            if let Some(rx) = master_shutdown_rx.take() {
+                println!(
+                    "Main Loop: Graceful shutdown process active, waiting for supervisor acknowledgment and finalization..."
+                );
 
-            if coord_ack_rx.await.is_err() {
-                eprintln!("Coordinator failed to shutdown gracefully. Retrying...");
-                tokio::time::sleep(Duration::from_secs(1)).await;
+                tokio::select! {
+                    biased;
+
+                    _ = rx => {
+                         println!("Main Loop: Supervisor acknowledgment sequence completed. Exiting application.");
+                         break 'main_loop;
+                    }
+
+                    _ = tokio::time::sleep(Duration::from_secs(15)) => {
+                         eprintln!("Main Loop: Overall timeout waiting for supervisor acknowledgment/finalization. Forcing exit.");
+                         break 'main_loop;
+                    }
+                     _ = tokio::signal::ctrl_c() => {
+                        eprintln!("Main Loop: Second Ctrl+C received during shutdown. Forcing exit immediately.");
+                        break 'main_loop;
+                    }
+                }
+            } else {
+                eprintln!(
+                    "Main Loop: In shutdown state but no signal to wait for. Exiting application."
+                );
+                break 'main_loop;
             }
-        },
-        _ = &mut gql_server_handle => {
-            eprintln!("GraphQL server task has completed.");
-            let (ack_tx, _) = tokio::sync::oneshot::channel::<bool>(); // Can ignore this ack for unexpected stop
-            supervisor_cmd_tx.send(coordinator::SupervisorCommand::InitiateShutdown { ack_channel: ack_tx }).await.ok();
+        } else {
+            tokio::select! {
+                biased;
+
+                ctrl_c_res = tokio::signal::ctrl_c() => {
+                    if ctrl_c_res.is_err() {
+                        eprintln!("Main Loop: Error listening for Ctrl+C: {:?}", ctrl_c_res.err());
+                        continue;
+                    }
+
+                    is_shutting_down = true;
+                    let(master_rx, _handle) = spawn_termination_task(cmd_router.clone()).await;
+                    master_shutdown_rx = Some(master_rx);
+
+                },
+
+                gql_server_res = &mut gql_server_handle, if !is_shutting_down && !gql_server_handle.is_finished() => {
+                     eprintln!("Main Loop: GraphQL server task has completed (Result: {:?}). Initiating graceful shutdown...", gql_server_res.is_ok());
+                     is_shutting_down = true;
+
+                    let (master_rx, _handle) = spawn_termination_task(cmd_router.clone()).await;
+                    master_shutdown_rx = Some(master_rx);
+
+                }
+            }
         }
     }
+
+    println!("Main Loop: Exiting application.");
+}
+
+async fn spawn_termination_task(
+    cmd_router: Arc<CommandRouter>,
+) -> (oneshot::Receiver<()>, JoinHandle<()>) {
+    let (master_tx, master_rx) = oneshot::channel::<()>();
+
+    let task_handle = tokio::spawn(async move {
+        let (coord_ack_tx, coord_ack_rx) = tokio::sync::oneshot::channel::<bool>();
+
+        if cmd_router
+            .dispatch(
+                SupervisorCommand::Terminate {
+                    ack_chan: coord_ack_tx,
+                },
+                None,
+            )
+            .await
+            .is_err()
+        {
+            eprintln!(
+                "Shutdown Task (Ctrl+C): Failed to dispatch Terminate command to supervisor."
+            );
+        } else {
+            println!("Shutdown Task (Ctrl+C): Waiting for supervisor ACK (timeout 5s)...");
+            match tokio::time::timeout(Duration::from_secs(5), coord_ack_rx).await {
+                Ok(Ok(true)) => {
+                    println!("Shutdown Task (Ctrl+C): Supervisor acknowledged graceful shutdown.")
+                }
+                Ok(Ok(false)) => eprintln!(
+                    "Shutdown Task (Ctrl+C): Supervisor acknowledged, but indicated shutdown was NOT fully graceful."
+                ),
+                Ok(Err(_e)) => eprintln!(
+                    "Shutdown Task (Ctrl+C): Supervisor ACK channel closed prematurely; shutdown likely failed or was abrupt before ack."
+                ),
+                Err(_e) => eprintln!(
+                    "Shutdown Task (Ctrl+C): Timeout waiting for supervisor's shutdown ACK."
+                ),
+            }
+        }
+
+        if master_tx.send(()).is_err() {
+            eprintln!(
+                "Shutdown Task (Ctrl+C): Failed to send completion signal to main loop (main loop might have already exited)."
+            );
+        }
+    });
+
+    (master_rx, task_handle)
 }
