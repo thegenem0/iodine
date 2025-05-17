@@ -1,18 +1,23 @@
-use std::{collections::HashMap, env, sync::Arc, time::Duration};
+use std::{env, sync::Arc, time::Duration};
 
 use coordinator::{CoordinatorConfig, SupervisorCommand, default::Coordinator};
+use discovery::RegistryDiscoveryService;
 use iodine_api_graphql::server::GraphQLServer;
-use iodine_api_grpc::client::GrpcClient;
-use iodine_common::{command::CommandRouter, state::DatabaseTrait};
+use iodine_common::{
+    command::{CommandRouter, DiscoveryCommand},
+    coordinator::CoordinatorCommand,
+    resource_manager::LocalProcessExecutionManager,
+    state::DatabaseTrait,
+};
 use iodine_persistence_pg::db::PostgresStateDb;
+use launcher::{LauncherStatus, exec_mgr_registry::ExecutionManagerRegistry};
 use tokio::{sync::oneshot, task::JoinHandle};
 
 #[allow(dead_code)]
 mod coordinator;
+mod discovery;
 #[allow(dead_code)]
 mod launcher;
-#[allow(dead_code)]
-mod resource_manager;
 
 #[tokio::main]
 async fn main() {
@@ -25,6 +30,22 @@ async fn main() {
     let db_arc: Arc<dyn DatabaseTrait> = Arc::new(state_db);
 
     let cmd_router = Arc::new(CommandRouter::new(None, None));
+
+    // register command handlers
+    cmd_router
+        .register_singleton_handler::<CoordinatorCommand>()
+        .await
+        .expect("Failed to register CoordinatorCommand handler");
+
+    cmd_router
+        .register_singleton_handler::<LauncherStatus>()
+        .await
+        .expect("Failed to register LauncherStatus handler");
+
+    cmd_router
+        .register_singleton_handler::<DiscoveryCommand>()
+        .await
+        .expect("Failed to register DiscoveryCommand handler");
 
     cmd_router
         .register_singleton_handler::<SupervisorCommand>()
@@ -43,21 +64,34 @@ async fn main() {
         .await
         .expect("Failed to start GraphQL server");
 
-    let grpc_client = GrpcClient::new(vec!["http://localhost:50051".to_string()])
-        .await
-        .expect("Failed to create gRPC client");
+    let mut exec_mgr_registry = ExecutionManagerRegistry::new();
+
+    exec_mgr_registry.register_manager(Arc::new(LocalProcessExecutionManager::new()));
 
     let mut coordinator = Coordinator::new(
         CoordinatorConfig { max_launchers: 10 },
         cmd_router.clone(),
         db_arc.clone(),
-        Arc::new(HashMap::new()),
-        Arc::new(grpc_client),
+        Arc::new(exec_mgr_registry),
     )
     .await;
 
     tokio::spawn(async move {
         coordinator.run_main_loop().await.unwrap();
+    });
+
+    let mut registry_discovery = RegistryDiscoveryService::new(
+        vec!["http://localhost:50051".to_string()],
+        cmd_router.clone(),
+        db_arc.clone(),
+    )
+    .await;
+
+    let _registry_discovery_handle = tokio::spawn(async move {
+        registry_discovery
+            .run_loop()
+            .await
+            .expect("Failed to start registry discovery");
     });
 
     // TODO(thegenem0):

@@ -5,7 +5,7 @@ use sea_orm_migration::{
 
 use crate::db_entities::{
     Coordinator, DbCoordinatorStatus, DbPipelineRunStatus, DbTaskStatus, EventLog, Launcher,
-    PipelineDefinition, PipelineRun, TaskDefinition, TaskDependency, TaskInstance,
+    PipelineDefinition, PipelineRun, TaskDefinition, TaskInstance,
 };
 
 const IDX_COORDINATORS_IS_LEADER: &str = "idx_coordinators_is_leader";
@@ -170,13 +170,12 @@ impl MigrationTrait for Migration {
                             .primary_key(),
                     )
                     .col(ColumnDef::new(PipelineRun::DefinitionId).uuid().not_null())
+                    .col(ColumnDef::new(PipelineRun::LauncherId).uuid().not_null())
                     .col(
                         ColumnDef::new(PipelineRun::Status)
                             .custom(DbPipelineRunStatus::name())
                             .not_null(),
                     )
-                    .col(ColumnDef::new(PipelineRun::Tags).json_binary())
-                    .col(ColumnDef::new(PipelineRun::TriggerInfo).json_binary())
                     .col(ColumnDef::new(PipelineRun::StartTime).timestamp_with_time_zone()) // Nullable
                     .col(ColumnDef::new(PipelineRun::EndTime).timestamp_with_time_zone()) // Nullable
                     .col(
@@ -222,70 +221,12 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(TaskDefinition::Description).text())
                     .col(ColumnDef::new(TaskDefinition::ConfigSchema).json_binary())
                     .col(ColumnDef::new(TaskDefinition::UserCodeMetadata).json_binary())
+                    .col(ColumnDef::new(TaskDefinition::DependsOn).array(ColumnType::Uuid))
                     .foreign_key(
                         ForeignKey::create()
                             .name("fk_task_def_pipeline")
                             .from(TaskDefinition::Table, TaskDefinition::PipelineId)
                             .to(PipelineDefinition::Table, PipelineDefinition::Id)
-                            .on_delete(ForeignKeyAction::Cascade)
-                            .on_update(ForeignKeyAction::Cascade),
-                    )
-                    .to_owned(),
-            )
-            .await?;
-
-        manager
-            .create_table(
-                Table::create()
-                    .table(TaskDependency::Table)
-                    .if_not_exists()
-                    .primary_key(
-                        Index::create()
-                            .col(TaskDependency::PipelineId)
-                            .col(TaskDependency::SourceTaskDefinitionId)
-                            .col(TaskDependency::TargetTaskDefinitionId)
-                            .col(TaskDependency::TargetInputName),
-                    )
-                    .col(ColumnDef::new(TaskDependency::PipelineId).uuid().not_null())
-                    .col(
-                        ColumnDef::new(TaskDependency::SourceTaskDefinitionId)
-                            .uuid()
-                            .not_null(),
-                    )
-                    .col(
-                        ColumnDef::new(TaskDependency::SourceOutputName)
-                            .text()
-                            .not_null(),
-                    )
-                    .col(
-                        ColumnDef::new(TaskDependency::TargetTaskDefinitionId)
-                            .uuid()
-                            .not_null(),
-                    )
-                    .col(
-                        ColumnDef::new(TaskDependency::TargetInputName)
-                            .text()
-                            .not_null(),
-                    )
-                    .foreign_key(
-                        ForeignKey::create()
-                            .name("fk_dep_source_task")
-                            .from(
-                                TaskDependency::Table,
-                                TaskDependency::SourceTaskDefinitionId,
-                            )
-                            .to(TaskDefinition::Table, TaskDefinition::Id)
-                            .on_delete(ForeignKeyAction::Cascade)
-                            .on_update(ForeignKeyAction::Cascade),
-                    )
-                    .foreign_key(
-                        ForeignKey::create()
-                            .name("fk_dep_target_task")
-                            .from(
-                                TaskDependency::Table,
-                                TaskDependency::TargetTaskDefinitionId,
-                            )
-                            .to(TaskDefinition::Table, TaskDefinition::Id)
                             .on_delete(ForeignKeyAction::Cascade)
                             .on_update(ForeignKeyAction::Cascade),
                     )
@@ -306,7 +247,6 @@ impl MigrationTrait for Migration {
                     )
                     .col(ColumnDef::new(TaskInstance::RunId).uuid().not_null())
                     .col(ColumnDef::new(TaskInstance::DefinitionId).uuid().not_null())
-                    .col(ColumnDef::new(TaskInstance::Name).text().not_null())
                     .col(
                         ColumnDef::new(TaskInstance::Status)
                             .custom(DbTaskStatus::name())
@@ -318,12 +258,10 @@ impl MigrationTrait for Migration {
                             .not_null()
                             .default(0),
                     )
-                    .col(ColumnDef::new(TaskInstance::WorkerId).uuid())
                     .col(ColumnDef::new(TaskInstance::OutputMetadata).json_binary())
-                    .col(ColumnDef::new(TaskInstance::ErrorData).json_binary())
+                    .col(ColumnDef::new(TaskInstance::Message).text())
                     .col(ColumnDef::new(TaskInstance::StartTime).timestamp_with_time_zone())
                     .col(ColumnDef::new(TaskInstance::EndTime).timestamp_with_time_zone())
-                    .col(ColumnDef::new(TaskInstance::LastHeartbeat).timestamp_with_time_zone())
                     .col(
                         ColumnDef::new(TaskInstance::CreatedAt)
                             .timestamp_with_time_zone()
@@ -557,14 +495,6 @@ impl MigrationTrait for Migration {
             .drop_table(
                 Table::drop()
                     .table(PipelineRun::Table)
-                    .if_exists()
-                    .to_owned(),
-            )
-            .await?;
-        manager
-            .drop_table(
-                Table::drop()
-                    .table(TaskDependency::Table)
                     .if_exists()
                     .to_owned(),
             )

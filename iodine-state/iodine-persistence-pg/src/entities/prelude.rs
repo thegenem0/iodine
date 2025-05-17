@@ -6,5 +6,4 @@ pub use super::launchers::Entity as Launchers;
 pub use super::pipeline_definitions::Entity as PipelineDefinitions;
 pub use super::pipeline_runs::Entity as PipelineRuns;
 pub use super::task_definitions::Entity as TaskDefinitions;
-pub use super::task_dependencies::Entity as TaskDependencies;
 pub use super::task_instances::Entity as TaskInstances;

@@ -78,12 +78,16 @@ impl PipelineRegistryService for GrpcPipelineRegistryService {
             let mut task_defs: Vec<TaskDefinitionProto> = Vec::new();
             let task_deps: Vec<TaskDependencyProto> = Vec::new();
 
+            let pipeline_name = format!("pipe-{}", def.id);
+            let pipeline_id = Uuid::new_v5(&self.registry_id, pipeline_name.as_bytes());
+
             for step in def.steps.iter() {
-                let task_def_id = Uuid::new_v5(&self.registry_id, step.name.as_bytes());
+                let task_name = format!("{}-{}", def.id, step.id);
+                let task_def_id = Uuid::new_v5(&pipeline_id, task_name.as_bytes());
 
                 let task_def = TaskDefinitionProto {
                     id: task_def_id.to_string(),
-                    name: step.name.clone(),
+                    name: task_name.clone(),
                     description: step.description.clone(),
                     config_schema: json_value_to_prost_struct(serde_json::Value::Object(
                         serde_json::Map::new(),
@@ -95,11 +99,9 @@ impl PipelineRegistryService for GrpcPipelineRegistryService {
                 task_defs.push(task_def);
             }
 
-            let task_dep_id = Uuid::new_v5(&self.registry_id, def.name.as_bytes());
-
             let proto = PipelineDefinitionProto {
-                id: task_dep_id.to_string(),
-                name: def.name.clone(),
+                id: pipeline_id.to_string(),
+                name: pipeline_name.clone(),
                 description: def.description.clone(),
                 default_backend: json_value_to_prost_struct(serde_json::Value::String(
                     "test".to_string(),

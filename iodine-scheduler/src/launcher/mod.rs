@@ -1,13 +1,23 @@
-use std::{collections::HashMap, sync::Arc};
+use std::{sync::Arc, time::Duration};
 
-use iodine_common::pipeline::PipelineDefinition;
+use iodine_common::{
+    pipeline::PipelineDefinition, resource_manager::ProvisionedWorkerDetails, task::TaskStatus,
+};
 use tokio::sync::oneshot;
 use uuid::Uuid;
 
 pub mod default;
+pub mod exec_mgr_registry;
+pub mod execution_graph;
+pub mod scheduling;
+pub mod state;
+pub mod util;
 
 pub struct LauncherConfig {
     pub config: serde_json::Value,
+    pub scheduler_tick_interval: Option<Duration>,
+    pub worker_polling_interval: Option<Duration>,
+    pub worker_channel_buffer_size: Option<usize>,
 }
 
 pub enum LauncherStatus {
@@ -15,12 +25,6 @@ pub enum LauncherStatus {
     Running,
     Terminating,
     Terminated,
-}
-
-pub struct PipelineExecutionGraph {
-    pub sorted_tasks: Vec<Uuid>,
-    pub dependencies: HashMap<Uuid, Vec<Uuid>>, // task -> list of tasks it depends on
-    pub dependents: HashMap<Uuid, Vec<Uuid>>,   // task -> list of tasks that depend on it
 }
 
 #[non_exhaustive]
@@ -31,4 +35,23 @@ pub enum LauncherCommand {
     Terminate {
         ack_chan: oneshot::Sender<bool>,
     },
+}
+
+#[derive(Debug)]
+pub struct WorkerResult {
+    // The ID Launcher assigned to this execution attempt (matches WorkerRequest.worker_id)
+    pub assigned_worker_id: Uuid,
+    pub task_id: Uuid,
+    pub attempt: u32,
+    pub final_status: TaskStatus,
+    pub message: Option<String>,
+}
+
+#[derive(Debug)]
+pub struct ActiveWorkerInfo {
+    task_id: Uuid,
+    attempt: u32,
+    provisioned_details: ProvisionedWorkerDetails,
+    monitor_cancel_tx: Option<oneshot::Sender<()>>,
+    task_name: String,
 }

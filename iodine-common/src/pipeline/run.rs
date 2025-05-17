@@ -8,13 +8,6 @@ pub struct PipelineRun {
     pub id: Uuid,
     pub definition_id: Uuid,
     pub status: PipelineRunStatus,
-
-    /// Tags for this run (e.g., {"user": "xyz", "env": "prod"})
-    pub tags: Option<serde_json::Value>,
-
-    /// How was it triggered? {type: "schedule/sensor/manual", name: "..."}
-    pub trigger_info: Option<serde_json::Value>,
-
     pub start_time: Option<DateTime<Utc>>,
     pub end_time: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,

@@ -1,9 +1,8 @@
 use std::{collections::HashMap, process, sync::Arc};
 
 use futures::{StreamExt, stream::FuturesUnordered};
-use iodine_api_grpc::client::GrpcClient;
 use iodine_common::{
-    command::CommandRouter,
+    command::{CommandRouter, DiscoveryCommand},
     coordinator::{CoordinatorCommand, CoordinatorStatus},
     error::Error,
     state::DatabaseTrait,
@@ -11,9 +10,9 @@ use iodine_common::{
 use tokio::sync::{RwLock, oneshot};
 use uuid::Uuid;
 
-use crate::{
-    launcher::{LauncherCommand, LauncherConfig, LauncherStatus, default::Launcher},
-    resource_manager::default::ResourceManager,
+use crate::launcher::{
+    LauncherCommand, LauncherConfig, LauncherStatus, default::Launcher,
+    exec_mgr_registry::ExecutionManagerRegistry,
 };
 
 use super::{CoordinatorConfig, ManagedLauncher, MonitoredLauncherTask, SupervisorCommand};
@@ -32,10 +31,7 @@ pub struct Coordinator {
     pub state_manager: Arc<dyn DatabaseTrait>,
 
     /// Collection of ResouceManagers that this coordinator is able to use.
-    /// ---
-    /// Note that pipelines are only able to use a given resource manager
-    /// if it is registered here. (i.e., LocalRun, Docker, CloudRun, etc.)
-    resource_managers: Arc<HashMap<Uuid, Arc<dyn ResourceManager>>>,
+    exec_managers: Arc<ExecutionManagerRegistry>,
 
     /// Contains info about all active launchers,
     /// ---
@@ -48,8 +44,6 @@ pub struct Coordinator {
     /// Used internally for polling completion/panic
     /// of RunLauncher tokio tasks.
     laucher_lifecycles: FuturesUnordered<MonitoredLauncherTask>,
-
-    grpc_client: Arc<GrpcClient>,
 }
 
 impl Coordinator {
@@ -57,18 +51,16 @@ impl Coordinator {
         config: CoordinatorConfig,
         command_router: Arc<CommandRouter>,
         state_manager: Arc<dyn DatabaseTrait>,
-        resource_managers: Arc<HashMap<Uuid, Arc<dyn ResourceManager>>>,
-        grpc_client: Arc<GrpcClient>,
+        exec_managers: Arc<ExecutionManagerRegistry>,
     ) -> Self {
         Self {
             id: Uuid::new_v4(),
             config,
             command_router,
             state_manager,
-            resource_managers,
+            exec_managers,
             active_launchers: Arc::new(RwLock::new(HashMap::new())),
             laucher_lifecycles: FuturesUnordered::new(),
-            grpc_client,
         }
     }
 
@@ -82,15 +74,6 @@ impl Coordinator {
 
         self.state_manager
             .create_new_coordinator(self.id, hostname, pid, "v0.1".to_string(), None)
-            .await?;
-
-        // register command handlers
-        self.command_router
-            .register_singleton_handler::<CoordinatorCommand>()
-            .await?;
-
-        self.command_router
-            .register_singleton_handler::<LauncherStatus>()
             .await?;
 
         // grab receivers for handlers needed by this coordinator
@@ -109,19 +92,9 @@ impl Coordinator {
             .subscribe::<LauncherStatus>(None)
             .await?;
 
-        let registries = self.grpc_client.get_metadata().await?;
-        let (registry_id, _) = registries.first().ok_or(Error::Internal(
-            "No registries found in gRPC client".to_string(),
-        ))?;
-
-        let pipeline_defs = self
-            .grpc_client
-            .get_pipeline_definitions(*registry_id)
+        self.command_router
+            .dispatch(DiscoveryCommand::InitRegistries, None)
             .await?;
-
-        for pipeline_def in pipeline_defs {
-            self.state_manager.register_pipeline(&pipeline_def).await?;
-        }
 
         // TODO(thegenem0):
         // Let's do some:
@@ -301,24 +274,28 @@ impl Coordinator {
 
         let command_router_clone = Arc::clone(&self.command_router);
         let state_mgr_clone = Arc::clone(&self.state_manager);
-        let resource_mgrs_clone = Arc::clone(&self.resource_managers);
+        let resource_mgrs_clone = Arc::clone(&self.exec_managers);
 
         self.command_router
             .register_instanced_handler::<LauncherCommand>(launcher_id)
             .await?;
 
-        let launcher_task_handle = tokio::spawn(async move {
-            let mut launcher = Launcher::new(
-                launcher_id,
-                coordinator_id,
-                LauncherConfig {
-                    config: serde_json::Value::default(),
-                },
-                command_router_clone,
-                state_mgr_clone,
-                resource_mgrs_clone,
-            );
+        let mut launcher = Launcher::new(
+            launcher_id,
+            coordinator_id,
+            LauncherConfig {
+                config: serde_json::Value::default(),
+                scheduler_tick_interval: None,
+                worker_polling_interval: None,
+                worker_channel_buffer_size: None,
+            },
+            command_router_clone,
+            state_mgr_clone,
+            resource_mgrs_clone,
+        )
+        .await?;
 
+        let launcher_task_handle = tokio::spawn(async move {
             let launcher_run_result = launcher.run_loop().await;
 
             if let Err(e) = &launcher_run_result {

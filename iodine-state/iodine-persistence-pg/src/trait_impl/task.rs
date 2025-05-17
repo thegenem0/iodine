@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use async_trait::async_trait;
 use chrono::{DateTime, FixedOffset, Utc};
 use iodine_common::{
@@ -13,11 +11,11 @@ use uuid::Uuid;
 
 use crate::{
     db::PostgresStateDb,
-    entities::{pipeline_runs, task_definitions, task_dependencies, task_instances},
+    entities::{task_definitions, task_instances},
     event_logging::{log_event_direct, log_event_in_txn},
     mapping::{
         db_error_to_domain, domain_task_status_to_db, task_definition_to_domain,
-        task_instance_to_domain, task_status_as_expr, task_status_to_domain,
+        task_instance_to_domain, task_status_as_expr,
     },
 };
 
@@ -88,67 +86,6 @@ impl TaskDbTrait for PostgresStateDb {
         ))
     }
 
-    async fn get_prerequisite_statuses(
-        &self,
-        run_id: Uuid,
-        task_id: Uuid,
-    ) -> Result<HashMap<Uuid, TaskStatus>, Error> {
-        let target_task =
-            self.get_task_instance(task_id)
-                .await?
-                .ok_or_else(|| Error::NotFound {
-                    resource_type: "TaskInstance".into(),
-                    resource_id: task_id.to_string(),
-                })?;
-
-        if target_task.run_id != run_id {
-            return Err(Error::InvalidInput(format!(
-                "Target task instance {} does not belong to run: {}",
-                task_id, run_id
-            )));
-        }
-
-        let dag_run_model = pipeline_runs::Entity::find_by_id(run_id)
-            .one(&self.conn)
-            .await
-            .map_err(db_error_to_domain)?
-            .ok_or_else(|| Error::NotFound {
-                resource_type: "PipelineRun".into(),
-                resource_id: run_id.to_string(),
-            })?;
-
-        let source_deps = task_dependencies::Entity::find()
-            .filter(task_dependencies::Column::TargetTaskDefinitionId.eq(target_task.definition_id))
-            .filter(task_dependencies::Column::PipelineId.eq(dag_run_model.definition_id))
-            .all(&self.conn)
-            .await
-            .map_err(db_error_to_domain)?;
-
-        let source_dep_ids: Vec<Uuid> = source_deps
-            .into_iter()
-            .map(|model| model.source_task_definition_id)
-            .collect();
-
-        if source_dep_ids.is_empty() {
-            return Ok(HashMap::new());
-        }
-
-        let prereq_statuses = task_instances::Entity::find()
-            .filter(task_instances::Column::RunId.eq(target_task.run_id))
-            .filter(task_instances::Column::DefinitionId.is_in(source_dep_ids))
-            .all(&self.conn)
-            .await
-            .map_err(db_error_to_domain)?;
-
-        // Map Task_id -> Status
-        let res = prereq_statuses
-            .into_iter()
-            .map(|model| (model.id, task_status_to_domain(model.status)))
-            .collect();
-
-        Ok(res)
-    }
-
     async fn update_task_status(
         &self,
         task_id: Uuid,
@@ -191,13 +128,6 @@ impl TaskDbTrait for PostgresStateDb {
             )
             .filter(task_instances::Column::Id.eq(task_id));
 
-        if let Some(error_data) = error_data {
-            update_query = update_query.col_expr(
-                task_instances::Column::ErrorData,
-                Expr::value(Some(error_data.clone())),
-            );
-        }
-
         match new_status {
             TaskStatus::Queued => {
                 // Only pending tasks can be queued
@@ -236,8 +166,6 @@ impl TaskDbTrait for PostgresStateDb {
                         task_instances::Column::EndTime,
                         Expr::value(None::<DateTime<Utc>>),
                     )
-                    .col_expr(task_instances::Column::WorkerId, Expr::value(None::<Uuid>))
-                    // Only failed or cancelled tasks can be retried
                     .filter(
                         task_instances::Column::Status
                             .eq(domain_task_status_to_db(TaskStatus::Failed)),
@@ -320,16 +248,35 @@ impl TaskDbTrait for PostgresStateDb {
             .await
     }
 
-    async fn record_task_heartbeat(&self, task_id: Uuid) -> Result<(), Error> {
+    async fn create_task_run(
+        &self,
+        run_id: Uuid,
+        task_def_id: Uuid,
+        attempt: u32,
+        status: TaskStatus,
+        output: Option<serde_json::Value>,
+        message: Option<String>,
+    ) -> Result<(), Error> {
         let now: DateTime<FixedOffset> = Utc::now().into();
         let txn = self.conn.begin().await.map_err(db_error_to_domain)?;
 
         let update_res = task_instances::Entity::update_many()
+            .col_expr(task_instances::Column::RunId, Expr::value(Some(run_id)))
             .col_expr(
-                task_instances::Column::LastHeartbeat,
-                Expr::value(Some(now)),
+                task_instances::Column::DefinitionId,
+                Expr::value(Some(task_def_id)),
             )
-            .filter(task_instances::Column::Id.eq(task_id))
+            .col_expr(task_instances::Column::Attempts, Expr::value(Some(attempt)))
+            .col_expr(
+                task_instances::Column::Status,
+                Expr::value(Some(domain_task_status_to_db(status))),
+            )
+            .col_expr(
+                task_instances::Column::OutputMetadata,
+                Expr::value(output.clone()),
+            )
+            .col_expr(task_instances::Column::StartTime, Expr::value(Some(now)))
+            .filter(task_instances::Column::RunId.eq(run_id))
             .exec(&txn)
             .await;
 
@@ -344,7 +291,7 @@ impl TaskDbTrait for PostgresStateDb {
 
                 Err(Error::NotFound {
                     resource_type: "TaskInstance".into(),
-                    resource_id: task_id.to_string(),
+                    resource_id: run_id.to_string(),
                 })
             }
             Err(db_err) => {
@@ -355,75 +302,8 @@ impl TaskDbTrait for PostgresStateDb {
                     None,
                     None,
                     EventType::EngineEvent,
-                    Some(format!("Failed DB update for task heartbeat: {}", db_err)),
-                    Some(serde_json::json!({"action": "record_task_heartbeat"})),
-                )
-                .await?;
-
-                Err(db_error_to_domain(db_err))
-            }
-        }
-    }
-
-    async fn claim_task(&self, task_id: Uuid, worker_id: Uuid) -> Result<TaskInstance, Error> {
-        let now: DateTime<FixedOffset> = Utc::now().into();
-        let txn = self.conn.begin().await.map_err(db_error_to_domain)?;
-
-        let update_res = task_instances::Entity::update_many()
-            .col_expr(
-                task_instances::Column::WorkerId,
-                Expr::value(Some(worker_id)),
-            )
-            .col_expr(task_instances::Column::StartTime, Expr::value(Some(now)))
-            // Null out the end time, since a new worker is claiming the task
-            // This might already be populated if the task is retried
-            .col_expr(
-                task_instances::Column::EndTime,
-                Expr::value(None::<DateTime<Utc>>),
-            )
-            // Null out the last heartbeat, since a new worker is claiming the task
-            // This might already be populated if the task is retried
-            .col_expr(
-                task_instances::Column::LastHeartbeat,
-                Expr::value(None::<DateTime<Utc>>),
-            )
-            .filter(task_instances::Column::Id.eq(task_id))
-            .exec(&txn)
-            .await;
-
-        match update_res {
-            Ok(res) if res.rows_affected > 0 => {
-                let model = task_instances::Entity::find_by_id(task_id)
-                    .one(&self.conn)
-                    .await
-                    .map_err(db_error_to_domain)?
-                    .ok_or_else(|| Error::NotFound {
-                        resource_type: "TaskInstance".into(),
-                        resource_id: task_id.to_string(),
-                    })?;
-
-                txn.commit().await.map_err(db_error_to_domain)?;
-
-                Ok(task_instance_to_domain(model))
-            }
-            Ok(_) => {
-                txn.rollback().await.map_err(db_error_to_domain)?;
-
-                Err(Error::NotFound {
-                    resource_type: "TaskInstance".into(),
-                    resource_id: task_id.to_string(),
-                })
-            }
-            Err(db_err) => {
-                txn.rollback().await.map_err(db_error_to_domain)?;
-
-                log_event_direct(
-                    &self.conn,
-                    None,
-                    None,
-                    EventType::EngineEvent,
-                    Some(format!("Failed DB update for task claim: {}", db_err)),
-                    Some(serde_json::json!({"action": "claim_task"})),
+                    Some(format!("Failed DB update for task run: {}", db_err)),
+                    Some(serde_json::json!({"action": "create_task_run"})),
                 )
                 .await?;
 

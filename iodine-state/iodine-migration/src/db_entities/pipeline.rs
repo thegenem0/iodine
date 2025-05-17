@@ -33,12 +33,10 @@ pub enum PipelineRun {
     Id,
     #[iden = "definition_id"]
     DefinitionId,
+    #[iden = "launcher_id"]
+    LauncherId,
     #[iden = "status"]
     Status,
-    #[iden = "tags"]
-    Tags,
-    #[iden = "trigger_info"]
-    TriggerInfo,
     #[iden = "start_time"]
     StartTime,
     #[iden = "end_time"]

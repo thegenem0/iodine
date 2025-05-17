@@ -25,7 +25,6 @@ message PipelineDefinitionProto {
   google.protobuf.Struct default_tags = 5;
   google.protobuf.Struct metadata = 6;
   repeated TaskDefinitionProto task_definitions = 7;
-  repeated TaskDependencyProto task_dependencies = 8;
 }
 
 message TaskDefinitionProto {
@@ -34,11 +33,5 @@ message TaskDefinitionProto {
   string description = 3;
   google.protobuf.Struct config_schema = 4;
   google.protobuf.Struct user_code_metadata = 6;
-}
-
-message TaskDependencyProto {
-  string source_task_definition_id = 1;
-  string source_output_name = 2;
-  string target_task_definition_id = 3;
-  string target_input_name = 4;
+  repeated string depends_on = 7;
 }

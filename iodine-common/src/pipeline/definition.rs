@@ -2,13 +2,12 @@ use serde::{Deserialize, Serialize};
 use strum_macros::{Display, EnumString};
 use uuid::Uuid;
 
-use crate::task::{TaskDefinition, TaskDependency};
+use crate::task::TaskDefinition;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct PipelineDefinition {
     pub info: PipelineInfo,
     pub task_definitions: Vec<TaskDefinition>,
-    pub task_dependencies: Vec<TaskDependency>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Default)]

@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use iodine_common::error::Error;
 
 use crate::schema::RegistryConfig;
@@ -17,6 +19,13 @@ pub fn parse_yaml(yaml_str: &str) -> Result<RegistryConfig, Error> {
         };
         Error::Internal(err.to_string())
     })?;
+
+    let pipeline_ids: HashSet<String> = registry.pipelines.iter().map(|p| p.id.clone()).collect();
+    if pipeline_ids.len() != registry.pipelines.len() {
+        return Err(Error::Internal(
+            "Duplicate pipeline IDs found in registry config".to_string(),
+        ));
+    }
 
     Ok(registry)
 }

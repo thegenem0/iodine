@@ -1,10 +1,10 @@
 version: 0.1
 registry_identifier: local_registry_01
 pipelines:
-  - id: pipeline_01
+  - name: Pipeline 1
     description: This is a pipeline
     steps:
-      - id: step_01
+      - name: Step 1
         description: This is a modified step
         needs:
           - Step 2
@@ -21,7 +21,7 @@ pipelines:
             cpu_request: 100m
             memory_request: 100m
             timeout_seconds: 10
-      - id: step_02
+      - name: Step 2
         description: This is a modified step
         needs:
           - Step 1
@@ -38,7 +38,7 @@ pipelines:
             cpu_request: 100m
             memory_request: 100m
             timeout_seconds: 10
-      - id: step_03
+      - name: Step 3
         description: This is a modified step
         needs:
           - Step 1
@@ -55,10 +55,10 @@ pipelines:
             cpu_request: 100m
             memory_request: 100m
             timeout_seconds: 10
-  - id: pipeline_02
+  - name: Pipeline 2
     description: This is a pipeline
     steps:
-      - id: step_01
+      - name: Step 1
         description: This is a modified step
         needs:
           - Step 2
@@ -75,7 +75,7 @@ pipelines:
             cpu_request: 100m
             memory_request: 100m
             timeout_seconds: 10
-      - id: step_02
+      - name: Step 2
         description: This is a modified step
         needs:
           - Step 1
@@ -92,7 +92,7 @@ pipelines:
             cpu_request: 100m
             memory_request: 100m
             timeout_seconds: 10
-      - id: step_03
+      - name: Step 3
         description: This is a modified step
         needs:
           - Step 1

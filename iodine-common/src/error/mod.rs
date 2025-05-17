@@ -37,4 +37,10 @@ pub enum Error {
 
     #[error("Internal Error: {0}")]
     Internal(String),
+
+    #[error("Terminate Signal Error")]
+    TerminateSignal,
+
+    #[error("Conflict Error: {0}")]
+    Conflict(String),
 }

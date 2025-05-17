@@ -1,4 +1,4 @@
-use std::{any::TypeId, net::SocketAddr, sync::Arc};
+use std::{net::SocketAddr, sync::Arc};
 
 use async_graphql::{EmptySubscription, Schema};
 use async_graphql_axum::{GraphQLRequest, GraphQLResponse};
@@ -7,9 +7,7 @@ use axum::{
     response::{Html, IntoResponse},
     routing::{get, post},
 };
-use iodine_common::{
-    command::CommandRouter, coordinator::CoordinatorCommand, error::Error, state::DatabaseTrait,
-};
+use iodine_common::{command::CommandRouter, error::Error, state::DatabaseTrait};
 use tokio::{net::TcpListener, task::JoinHandle};
 use tower_http::cors::Any;
 

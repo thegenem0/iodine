@@ -6,7 +6,6 @@ use uuid::Uuid;
 use crate::{
     error::{Error, WorkerError},
     pipeline::{PipelineDefinition, PipelineInfo, PipelineRun, PipelineRunStatus},
-    task::TaskDefinition,
 };
 
 use super::base::BaseDbTrait;
@@ -65,22 +64,20 @@ pub trait PipelineDbTrait: BaseDbTrait {
     /// the corresponding task records,
     /// and sets initial statuses.
     /// It does `NOT` schedule the run.
-    async fn create_new_run(
+    async fn create_pipeline_run(
         &self,
-        pipeline_id: Uuid,
-        run_config: Option<serde_json::Value>,
-        tags: Option<serde_json::Value>,
-        trigger_info: Option<serde_json::Value>,
+        pipeline_run_id: Uuid,
+        pipeline_def_id: Uuid,
+        launcher_id: Uuid,
         initial_run_status: PipelineRunStatus,
-        tasks_in_pipeline: &HashMap<Uuid, TaskDefinition>,
     ) -> Result<(), Error>;
 
     /// Updates a pipeline run's status
-    async fn record_run_staus_change(
+    async fn update_pipeline_run_status(
         &self,
         run_id: Uuid,
         new_status: PipelineRunStatus,
-        metadata: Option<serde_json::Value>,
+        message: Option<String>,
     ) -> Result<(), Error>;
 
     /// Finalizes a pipeline run

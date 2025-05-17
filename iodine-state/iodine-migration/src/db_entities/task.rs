@@ -17,22 +17,8 @@ pub enum TaskDefinition {
     ConfigSchema,
     #[iden = "user_code_metadata"]
     UserCodeMetadata,
-}
-
-#[derive(Iden)]
-#[iden = "task_dependencies"]
-pub enum TaskDependency {
-    Table,
-    #[iden = "pipeline_id"]
-    PipelineId,
-    #[iden = "source_task_definition_id"]
-    SourceTaskDefinitionId,
-    #[iden = "source_output_name"]
-    SourceOutputName,
-    #[iden = "target_task_definition_id"]
-    TargetTaskDefinitionId,
-    #[iden = "target_input_name"]
-    TargetInputName,
+    #[iden = "depends_on"]
+    DependsOn,
 }
 
 #[derive(Iden)]
@@ -45,8 +31,6 @@ pub enum TaskInstance {
     RunId,
     #[iden = "definition_id"]
     DefinitionId,
-    #[iden = "name"]
-    Name,
     #[iden = "status"]
     Status,
     #[iden = "attempts"]
@@ -55,14 +39,10 @@ pub enum TaskInstance {
     StartTime,
     #[iden = "end_time"]
     EndTime,
-    #[iden = "worker_id"]
-    WorkerId,
     #[iden = "output_metadata"]
     OutputMetadata,
-    #[iden = "error_data"]
-    ErrorData,
-    #[iden = "last_heartbeat"]
-    LastHeartbeat,
+    #[iden = "message"]
+    Message,
     #[iden = "created_at"]
     CreatedAt,
     #[iden = "updated_at"]

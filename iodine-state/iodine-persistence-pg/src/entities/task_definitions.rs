@@ -17,6 +17,7 @@ pub struct Model {
     pub config_schema: Option<Json>,
     #[sea_orm(column_type = "JsonBinary", nullable)]
     pub user_code_metadata: Option<Json>,
+    pub depends_on: Option<Vec<Uuid>>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

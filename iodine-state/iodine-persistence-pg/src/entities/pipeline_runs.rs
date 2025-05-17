@@ -10,11 +10,8 @@ pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: Uuid,
     pub definition_id: Uuid,
+    pub launcher_id: Uuid,
     pub status: PipelineRunStatus,
-    #[sea_orm(column_type = "JsonBinary", nullable)]
-    pub tags: Option<Json>,
-    #[sea_orm(column_type = "JsonBinary", nullable)]
-    pub trigger_info: Option<Json>,
     pub start_time: Option<DateTimeWithTimeZone>,
     pub end_time: Option<DateTimeWithTimeZone>,
     pub created_at: DateTimeWithTimeZone,

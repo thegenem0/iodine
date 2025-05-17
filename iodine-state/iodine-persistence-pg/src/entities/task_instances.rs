@@ -11,18 +11,14 @@ pub struct Model {
     pub id: Uuid,
     pub run_id: Uuid,
     pub definition_id: Uuid,
-    #[sea_orm(column_type = "Text")]
-    pub name: String,
     pub status: TaskStatus,
     pub attempts: i32,
-    pub worker_id: Option<Uuid>,
     #[sea_orm(column_type = "JsonBinary", nullable)]
     pub output_metadata: Option<Json>,
-    #[sea_orm(column_type = "JsonBinary", nullable)]
-    pub error_data: Option<Json>,
+    #[sea_orm(column_type = "Text", nullable)]
+    pub message: Option<String>,
     pub start_time: Option<DateTimeWithTimeZone>,
     pub end_time: Option<DateTimeWithTimeZone>,
-    pub last_heartbeat: Option<DateTimeWithTimeZone>,
     pub created_at: DateTimeWithTimeZone,
     pub updated_at: DateTimeWithTimeZone,
 }

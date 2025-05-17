@@ -6,5 +6,6 @@ pub mod error;
 pub mod event;
 pub mod launcher;
 pub mod pipeline;
+pub mod resource_manager;
 pub mod state;
 pub mod task;

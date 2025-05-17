@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = [ "iodine-api/iodine-api-graphql", "iodine-api/iodine-api-grpc", "iodine-api/iodine-protobuf", "iodine-common", "iodine-registry", "iodine-scheduler", "iodine-state/iodine-migration", "iodine-state/iodine-persistence-pg"]
+members = [ "iodine-api/iodine-api-graphql", "iodine-api/iodine-api-grpc", "iodine-api/iodine-protobuf", "iodine-common", "iodine-contrib/python/iodine-pysdk", "iodine-playground", "iodine-registry", "iodine-scheduler", "iodine-state/iodine-migration", "iodine-state/iodine-persistence-pg"]
 
 [workspace.dependencies]
 iodine-common = { path = "iodine-common" }
@@ -39,3 +39,6 @@ hostname = "0.4.1"
 serde_yaml = "0.9.34"
 tonic-types = "0.13.1"
 clap = "4.5.38"
+bollard = "0.18.1"
+byte-unit = "5.1.6"
+petgraph = "0.8.1"

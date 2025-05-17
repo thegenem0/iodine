@@ -9,14 +9,14 @@ pub struct RegistryConfig {
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct Pipeline {
-    pub name: String,
+    pub id: String,
     pub description: String,
     pub steps: Vec<Step>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct Step {
-    pub name: String,
+    pub id: String,
     pub description: String,
     pub environment: Vec<KvPair>,
     pub labels: Vec<KvPair>,

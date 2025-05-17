@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use async_trait::async_trait;
 use uuid::Uuid;
 
@@ -41,15 +39,6 @@ pub trait TaskDbTrait: BaseDbTrait {
         run_id: Option<Uuid>,
     ) -> Result<(Vec<TaskInstance>, u64), Error>;
 
-    /// Gets `(task_id, task_status)` tuples for all nodes
-    /// that are prerequisites of the node with `task_id`
-    /// within a given run (`run_id`).
-    async fn get_prerequisite_statuses(
-        &self,
-        run_id: Uuid,
-        task_id: Uuid,
-    ) -> Result<HashMap<Uuid, TaskStatus>, Error>;
-
     /// Updates the status of a task instance
     /// ---
     /// Reason or other metadata can be provided
@@ -69,15 +58,17 @@ pub trait TaskDbTrait: BaseDbTrait {
     /// Should be called by an `<impl RunLauncher>` instance
     async fn enqueue_task(&self, task_id: Uuid) -> Result<(), Error>;
 
-    /// Records a task instance's heartbeat
+    /// Creates a new `TaskRun` for a `TaskDefinition` with `run_id`
     /// ---
     /// This is used to track the status of
     /// long-running tasks.
-    /// TODO(thegenem0): Should accept an `Option<HeartbeatInfo>`
-    async fn record_task_heartbeat(&self, task_id: Uuid) -> Result<(), Error>;
-
-    /// Claims a `Queued` task `task_id` for a worker `worker_id`
-    ///---
-    ///Return `TaskInstance` if successful
-    async fn claim_task(&self, task_id: Uuid, worker_id: Uuid) -> Result<TaskInstance, Error>;
+    async fn create_task_run(
+        &self,
+        run_id: Uuid,
+        task_def_id: Uuid,
+        attempt: u32,
+        status: TaskStatus,
+        output: Option<serde_json::Value>,
+        message: Option<String>,
+    ) -> Result<(), Error>;
 }

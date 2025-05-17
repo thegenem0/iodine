@@ -13,4 +13,7 @@ pub struct TaskDefinition {
 
     /// Metadata about the code implementing this task (e.g., function name, module)
     pub user_code_metadata: Option<serde_json::Value>,
+
+    /// Task ids on which this task depends
+    pub depends_on: Vec<Uuid>,
 }

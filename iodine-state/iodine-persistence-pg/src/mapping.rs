@@ -1,13 +1,13 @@
 use crate::entities::{
     coordinators, event_log, pipeline_definitions, pipeline_runs, sea_orm_active_enums,
-    task_definitions, task_dependencies, task_instances,
+    task_definitions, task_instances,
 };
 use iodine_common::{
     coordinator::{Coordinator, CoordinatorStatus},
     error::Error,
     event::{EventLogRecord, EventType},
     pipeline::{PipelineBackend, PipelineDefinition, PipelineInfo, PipelineRun, PipelineRunStatus},
-    task::{TaskDefinition, TaskDependency, TaskInstance, TaskStatus},
+    task::{TaskDefinition, TaskInstance, TaskStatus},
 };
 use sea_orm::{
     DbErr,
@@ -67,7 +67,6 @@ pub(crate) fn coordinator_status_as_expr(model: CoordinatorStatus) -> SimpleExpr
 pub(crate) fn pipeline_definition_to_domain(
     pipeline_definition: pipeline_definitions::Model,
     tasks_definitions: Vec<task_definitions::Model>,
-    task_dependencies: Vec<task_dependencies::Model>,
 ) -> PipelineDefinition {
     let info = pipeline_info_to_domain(pipeline_definition);
 
@@ -76,15 +75,9 @@ pub(crate) fn pipeline_definition_to_domain(
         .map(task_definition_to_domain)
         .collect();
 
-    let task_deps: Vec<TaskDependency> = task_dependencies
-        .into_iter()
-        .map(task_dependency_to_domain)
-        .collect();
-
     PipelineDefinition {
         info,
         task_definitions: task_defs,
-        task_dependencies: task_deps,
     }
 }
 
@@ -111,16 +104,7 @@ pub(crate) fn task_definition_to_domain(model: task_definitions::Model) -> TaskD
         description: model.description,
         config_schema: model.config_schema,
         user_code_metadata: model.user_code_metadata,
-    }
-}
-
-pub(crate) fn task_dependency_to_domain(model: task_dependencies::Model) -> TaskDependency {
-    TaskDependency {
-        pipeline_id: model.pipeline_id,
-        source_task_definition_id: model.source_task_definition_id,
-        source_output_name: model.source_output_name,
-        target_task_definition_id: model.target_task_definition_id,
-        target_input_name: model.target_input_name,
+        depends_on: model.depends_on.unwrap_or_default(),
     }
 }
 
@@ -129,8 +113,6 @@ pub(crate) fn pipeline_run_to_domain(model: pipeline_runs::Model) -> PipelineRun
         id: model.id,
         definition_id: model.definition_id,
         status: pipeline_status_to_domain(model.status),
-        tags: model.tags,
-        trigger_info: model.trigger_info,
         start_time: model.start_time.map(|t| t.into()),
         end_time: model.end_time.map(|t| t.into()),
         created_at: model.created_at.into(),
@@ -143,15 +125,11 @@ pub(crate) fn task_instance_to_domain(model: task_instances::Model) -> TaskInsta
         id: model.id,
         run_id: model.run_id,
         definition_id: model.definition_id,
-        name: model.name,
         status: task_status_to_domain(model.status),
         attempts: model.attempts,
         start_time: model.start_time.map(|t| t.into()),
         end_time: model.end_time.map(|t| t.into()),
-        worker_id: model.worker_id,
         output_metadata: model.output_metadata,
-        error_data: model.error_data,
-        last_heartbeat: model.last_heartbeat.map(|t| t.into()),
         created_at: model.created_at.into(),
         updated_at: model.updated_at.into(),
     }
