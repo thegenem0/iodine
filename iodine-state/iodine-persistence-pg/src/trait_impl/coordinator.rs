@@ -103,14 +103,11 @@ impl CoordinatorDbTrait for PostgresStateDb {
             )
             .filter(coordinators::Column::Id.eq(id));
 
-        match status {
-            CoordinatorStatus::Terminated => {
-                update_query = update_query.col_expr(
-                    coordinators::Column::TerminatedAt,
-                    Expr::current_timestamp().into(),
-                );
-            }
-            _ => {}
+        if status == CoordinatorStatus::Terminated {
+            update_query = update_query.col_expr(
+                coordinators::Column::TerminatedAt,
+                Expr::current_timestamp().into(),
+            );
         }
 
         let update_res = update_query.exec(&txn).await;

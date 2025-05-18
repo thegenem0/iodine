@@ -72,9 +72,9 @@ impl Launcher {
             fail_empty = false;
         }
 
-        if handled_sched || (launch_empty && fail_empty) {
-            self.check_and_finalize_pipeline_if_complete().await?;
-        }
+        // if handled_sched || (launch_empty && fail_empty) {
+        self.check_and_finalize_pipeline_if_complete().await?;
+        // }
 
         Ok(())
     }

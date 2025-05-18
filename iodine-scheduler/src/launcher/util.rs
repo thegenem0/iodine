@@ -1,10 +1,17 @@
 use iodine_common::{error::Error, resource_manager::ProvisionedWorkerStatus, task::TaskRunStatus};
+use tracing::info;
 use uuid::Uuid;
 
 use super::default::Launcher;
 
 impl Launcher {
     pub(super) async fn check_and_finalize_pipeline_if_complete(&mut self) -> Result<(), Error> {
+        info!(
+            "Launcher [{}]: Checking and finalizing pipeline run {}.",
+            self.id,
+            self.current_pipeline_run_id.unwrap_or_default()
+        );
+
         // FIXME(thegenem0):
         // Figure out why this is not being called.
         // Pipeline state is never being finalized,
@@ -18,7 +25,9 @@ impl Launcher {
         // Pipeline can only be complete if no tasks are being actively polled and no workers are supposedly active.
         if !self.active_workers.is_empty() || !self.polling_monitor_tasks.is_empty() {
             println!(
-                "Active workers or polling monitor tasks present. Skipping finalization check."
+                "Active workers or polling monitor tasks present. Skipping finalization check. Active workers: {}, Polling tasks: {}",
+                self.active_workers.len(),
+                self.polling_monitor_tasks.len()
             );
             return Ok(());
         }
@@ -26,9 +35,21 @@ impl Launcher {
         let graph = self.execution_graph.as_ref().unwrap();
 
         if let Some(final_status) = graph.is_pipeline_complete(&self.task_states) {
-            println!("Pipeline complete. Finalizing.");
-            let run_id = self.current_pipeline_run_id.unwrap();
-            self.finalize_pipeline(run_id, final_status, None).await?;
+            println!(
+                "Pipeline complete. Finalizing with status: {:?}",
+                final_status
+            );
+            let pipeline_run_id = self.current_pipeline_run_id.ok_or_else(|| {
+                Error::Internal("No current pipeline run ID found for finalization".to_string())
+            })?;
+
+            self.finalize_pipeline(pipeline_run_id, final_status, None)
+                .await?;
+        } else {
+            println!(
+                "Pipeline not yet complete according to graph.is_pipeline_complete. Task states: {:?}",
+                self.task_states
+            );
         }
 
         Ok(())

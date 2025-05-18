@@ -327,6 +327,7 @@ impl PipelineDbTrait for PostgresStateDb {
         new_status: PipelineRunStatus,
         message: Option<String>,
     ) -> Result<(), Error> {
+        let now: DateTime<FixedOffset> = Utc::now().into();
         let txn = self.conn.begin().await.map_err(db_error_to_domain)?;
 
         let event_type = match new_status {
@@ -339,18 +340,27 @@ impl PipelineDbTrait for PostgresStateDb {
             PipelineRunStatus::Cancelled => EventType::RunCanceled,
         };
 
-        let update_res = pipeline_runs::Entity::update_many()
+        let mut update_query = pipeline_runs::Entity::update_many()
             .col_expr(
                 pipeline_runs::Column::Status,
-                pipeline_status_as_expr(PipelineRunStatus::Queued),
+                pipeline_status_as_expr(new_status),
             )
-            .col_expr(
-                pipeline_runs::Column::UpdatedAt,
-                Expr::value(Some(Utc::now())),
-            )
-            .filter(pipeline_runs::Column::Id.eq(pipeline_run_id))
-            .exec(&txn)
-            .await;
+            .col_expr(pipeline_runs::Column::UpdatedAt, Expr::value(Some(now)))
+            .filter(pipeline_runs::Column::Id.eq(pipeline_run_id));
+
+        match new_status {
+            PipelineRunStatus::Succeeded
+            | PipelineRunStatus::Failed
+            | PipelineRunStatus::Cancelled => {
+                update_query =
+                    update_query.col_expr(pipeline_runs::Column::EndTime, Expr::value(Some(now)));
+            }
+            _ => {
+                // No additional fields to update
+            }
+        }
+
+        let update_res = update_query.exec(&txn).await;
 
         match update_res {
             Ok(res) if res.rows_affected > 0 => {

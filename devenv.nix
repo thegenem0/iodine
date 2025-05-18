@@ -5,14 +5,7 @@
     components = [ "rustc" "cargo" "clippy" "rustfmt" "rust-analyzer" ];
   };
 
-  packages = with pkgs; [
-    clang-tools_19
-    cargo-expand
-    valgrind
-    sqlitebrowser
-    protobuf
-    firecracker
-  ];
+  packages = with pkgs; [ clang-tools_19 cargo-expand protobuf lldb ];
 
   enterShell = ''
     cargo install --locked cargo-autoinherit

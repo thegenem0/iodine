@@ -6,8 +6,7 @@ use iodine_common::{
     error::Error,
     pipeline::PipelineRunStatus,
     resource_manager::{
-        ExecutionContext, ExecutionContextKind, ExecutionManager, LocalProcessExecutionContext,
-        ProvisionedWorkerDetails, WorkerRequest,
+        ExecutionContextKind, ExecutionManager, ProvisionedWorkerDetails, WorkerRequest,
     },
     state::DatabaseTrait,
     task::{TaskDefinition, TaskRunStatus},
@@ -218,18 +217,7 @@ impl Launcher {
     ) -> Result<(), Error> {
         let assigned_worker_id = Uuid::new_v4();
 
-        // FIXME(thegenem0):
-        // This should come from a field like `task_def.execution_details`
-        let exec_ctx = ExecutionContext::LocalProcess(LocalProcessExecutionContext {
-            entry_point: vec!["sh".to_string()],
-            args: vec![
-                "-c".to_string(),
-                "mkdir -p /tmp/iodine-worker-data && echo 'Hello, world!' > /tmp/iodine-worker-data/hello.txt".to_string()
-            ],
-            env_vars: HashMap::new(),
-            exec_timeout: None,
-        });
-
+        let exec_ctx = task_def.execution_ctx.clone();
         let exec_ctx_kind = ExecutionContextKind::from(&exec_ctx);
 
         let manager = self
@@ -372,12 +360,21 @@ impl Launcher {
                 biased;
 
                 _ = &mut cancel_rx => {
-                    info!("[PollingMonitor for '{}' ({})] Cancellation signal received from Launcher.", task_name, assigned_worker_id);
+                    info!(
+                        "[PollingMonitor for '{}' ({})] Cancellation signal received from Launcher.",
+                        task_name, assigned_worker_id,
+                    );
 
                     if let Err(e) = em.cancel_execution(&details).await {
-                        error!("[PollingMonitor for '{}' ({})] EM failed to process cancel_execution: {}. Marking as Cancelled anyway.", task_name, assigned_worker_id, e);
+                        error!(
+                            "[PollingMonitor for '{}' ({})] EM failed to cancel execution: {}. Marking as Cancelled anyway.",
+                            task_name, assigned_worker_id, e,
+                        );
                     } else {
-                        info!("[PollingMonitor for '{}' ({})] EM cancel_execution succeeded.", task_name, assigned_worker_id);
+                        info!(
+                            "[PollingMonitor for '{}' ({})] EM cancel execution succeeded.",
+                            task_name, assigned_worker_id,
+                        );
                     }
 
                     final_task_status = Some(TaskRunStatus::Cancelled);
@@ -389,7 +386,10 @@ impl Launcher {
                         match em.get_execution_status(&details).await {
                             Ok(em_status) => {
                                 let (current_task_status, msg, is_terminal) = Self::map_em_status_to_task_status(em_status.clone());
-                                info!("[PollingMonitor for '{}' ({})] Polled EM status: {:?} -> TaskStatus: {:?}", task_name, assigned_worker_id, em_status, current_task_status);
+                                info!(
+                                    "[PollingMonitor for '{}' ({})] Polled EM status: {:?} -> TaskStatus: {:?}",
+                                    task_name, assigned_worker_id, em_status, current_task_status,
+                                );
 
                                 if is_terminal {
                                     final_task_status = Some(current_task_status);
@@ -402,7 +402,11 @@ impl Launcher {
                                 }
                             }
                             Err(e) => {
-                                error!("[PollingMonitor for '{}' ({})] Error polling EM status: {}. Marking as failed.", task_name, assigned_worker_id, e);
+                                error!(
+                                    "[PollingMonitor for '{}' ({})] Error polling EM status: {}. Marking as failed.",
+                                    task_name, assigned_worker_id, e,
+                                );
+
                                 final_task_status = Some(TaskRunStatus::Failed);
                                 final_message = Some(format!("Error polling EM: {}", e));
                                 break;
@@ -422,7 +426,7 @@ impl Launcher {
 
         if results_tx.send(result_to_send).await.is_err() {
             error!(
-                "[PollingMonitor for '{}' ({})] Failed to send its final result to Launcher (channel closed).",
+                "[PollingMonitor for '{}' ({})] Failed to send final result to Launcher (channel closed).",
                 task_name, assigned_worker_id
             );
         }
@@ -443,16 +447,6 @@ impl Launcher {
     }
 
     async fn handle_worker_result(&mut self, result: WorkerResult) -> Result<(), Error> {
-        info!(
-            "Launcher [{}]: Handling WorkerResult - launcher_worker_id: {}, task_id: {}, attempt: {}, status: {:?}, msg: '{}'",
-            self.id,
-            result.assigned_worker_id,
-            result.task_id,
-            result.attempt,
-            result.final_status,
-            result.message.as_deref().unwrap_or("")
-        );
-
         // Remove from active_workers.
         // The monitor task is responsible for EM.teardown_worker.
         if self
@@ -566,7 +560,8 @@ impl Launcher {
 
             if self.active_workers.remove(&worker_id).is_some() {
                 error!(
-                    "Launcher [{}]: CRITICAL - Worker {} was still in active_workers when its monitor JoinHandle completed. WorkerResult message likely lost or monitor task errored before sending.",
+                    "Launcher [{}]: CRITICAL - Worker {} was still in active_workers when its monitor JoinHandle completed.
+                     WorkerResult message likely lost or monitor task errored before sending.",
                     self.id, worker_id
                 );
                 // FIXME(thegenem0): Need a robust way to mark the associated pipeline task as errored here.
@@ -576,7 +571,8 @@ impl Launcher {
             }
         } else if let Some(err_msg) = error_str_opt {
             error!(
-                "Launcher [{}]: A polling monitor task exited with an issue: {}. Unable to map to specific worker ID from JoinHandle outcome directly.",
+                "Launcher [{}]: A polling monitor task exited with an issue: {}.
+                 Unable to map to specific worker ID from JoinHandle outcome directly.",
                 self.id, err_msg
             );
             // This is a tricky state. Might need to iterate all active_workers and check their JoinHandles if they were stored,
@@ -595,7 +591,7 @@ impl Launcher {
 
     pub(super) async fn finalize_pipeline(
         &mut self,
-        run_id: Uuid,
+        pipeline_run_id: Uuid,
         status: PipelineRunStatus,
         message: Option<String>,
     ) -> Result<(), Error> {
@@ -606,15 +602,23 @@ impl Launcher {
         info!(
             "Launcher [{}]: Finalizing pipeline run {} (def {}) with status: {:?}, msg: {:?}",
             self.id,
-            run_id,
+            pipeline_run_id,
             def_id,
             status,
             message.as_deref().unwrap_or("")
         );
 
+        self.cleanup_current_pipeline_state();
+
         self.state_manager
-            .update_pipeline_run_status(run_id, status, message)
+            .update_pipeline_run_status(pipeline_run_id, status, message)
             .await?;
+
+        info!(
+            "Launcher [{}]: Pipeline run {} state cleaned up.
+             Signalling Coordinator for launcher termination.",
+            self.id, pipeline_run_id
+        );
 
         // TODO(thegenem0): Notify Coordinator via CommandRouter
         // ---
@@ -629,12 +633,6 @@ impl Launcher {
         //     eprintln!("Launcher [{}]: Failed to send pipeline completion update to Coordinator: {}", self.id, e);
         // }
 
-        self.cleanup_current_pipeline_state();
-
-        info!(
-            "Launcher [{}]: Pipeline run {} state cleaned up.",
-            self.id, run_id
-        );
         Ok(())
     }
 

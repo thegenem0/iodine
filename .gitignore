@@ -18,3 +18,5 @@ devenv.local.nix
 local_data
 .env
 ARCHITECTURE.md
+context.txt
+gen.py
