@@ -20,7 +20,7 @@ pub struct EventLogRecord {
 }
 
 #[derive(Clone, Debug, Copy, PartialEq, Eq, Serialize, Deserialize, EnumString, Display)]
-#[strum(serialize_all = "UPPERCASE")]
+#[strum(serialize_all = "SCREAMING_SNAKE_CASE")]
 #[non_exhaustive]
 pub enum EventType {
     // Pipeline lifecycle

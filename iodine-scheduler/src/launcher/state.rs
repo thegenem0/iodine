@@ -62,16 +62,21 @@ impl Launcher {
 
                 self.task_states.insert(task_def_id, TaskRunStatus::Pending);
 
+                let task_run_id = Uuid::new_v4();
+
                 self.state_manager
                     .create_task_run(
-                        pipeline_run_id,
+                        task_run_id,
                         task_def.id,
+                        pipeline_run_id,
                         0,
                         TaskRunStatus::Pending,
                         None,
                         None,
                     )
                     .await?;
+
+                self.run_def_map.insert(task_def.id, task_run_id);
             }
         }
 

@@ -5,21 +5,30 @@ use super::default::Launcher;
 
 impl Launcher {
     pub(super) async fn check_and_finalize_pipeline_if_complete(&mut self) -> Result<(), Error> {
+        // FIXME(thegenem0):
+        // Figure out why this is not being called.
+        // Pipeline state is never being finalized,
+        // even when all nodes are complete.
+
         if self.execution_graph.is_none() || self.current_pipeline_run_id.is_none() {
+            println!("No execution graph or run ID for finalization. Skipping finalization check.");
             return Ok(());
         }
 
         // Pipeline can only be complete if no tasks are being actively polled and no workers are supposedly active.
         if !self.active_workers.is_empty() || !self.polling_monitor_tasks.is_empty() {
+            println!(
+                "Active workers or polling monitor tasks present. Skipping finalization check."
+            );
             return Ok(());
         }
 
         let graph = self.execution_graph.as_ref().unwrap();
 
         if let Some(final_status) = graph.is_pipeline_complete(&self.task_states) {
+            println!("Pipeline complete. Finalizing.");
             let run_id = self.current_pipeline_run_id.unwrap();
-            self.finalize_pipeline(run_id, final_status, None)
-                .await?;
+            self.finalize_pipeline(run_id, final_status, None).await?;
         }
 
         Ok(())

@@ -8,6 +8,7 @@ use iodine_common::{
     state::DatabaseTrait,
 };
 use tokio::sync::{RwLock, oneshot};
+use tracing::info;
 use uuid::Uuid;
 
 use crate::launcher::{
@@ -296,6 +297,7 @@ impl Coordinator {
         .await?;
 
         let launcher_task_handle = tokio::spawn(async move {
+            info!("Starting launcher task for launcher {}", launcher.id);
             let launcher_run_result = launcher.run_loop().await;
 
             if let Err(e) = &launcher_run_result {

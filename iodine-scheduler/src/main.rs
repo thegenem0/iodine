@@ -21,6 +21,10 @@ mod launcher;
 
 #[tokio::main]
 async fn main() {
+    tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::INFO)
+        .init();
+
     let database_url = env::var("DATABASE_URL").expect("DATABASE_URL must be set");
 
     let state_db = PostgresStateDb::new(&database_url)

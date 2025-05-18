@@ -13,6 +13,7 @@ use petgraph::{
 use tracing::warn;
 use uuid::Uuid;
 
+#[derive(Debug)]
 pub struct PipelineExecutionGraph {
     /// The directed graph where nodes are task definitions and edges represent dependencies.
     /// An edge from Task A to Task B means Task A must complete before Task B can start.

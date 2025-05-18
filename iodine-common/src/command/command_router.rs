@@ -30,7 +30,7 @@ enum RoutingKey {
     Instanced(TypeId, Uuid),
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 /// Command router
 /// ---
 /// It handles dispatching of commands to their appropriate handlers,

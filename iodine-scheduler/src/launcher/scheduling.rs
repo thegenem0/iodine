@@ -11,15 +11,15 @@ use super::default::Launcher;
 pub(super) struct TaskToLaunch {
     task_definition: TaskDefinition,
     pipeline_run_id: Uuid,
-    attempt: u32,
+    attempt: i32,
 }
 
 #[derive(Debug, Clone)]
 pub(super) struct TaskExceedingRetries {
     task_def_id: Uuid,
     pipeline_run_id: Uuid,
-    completed_attempts: u32,
-    max_retries_allowed: u32,
+    completed_attempts: i32,
+    max_retries_allowed: i32,
     task_name: String,
 }
 
@@ -105,7 +105,7 @@ impl Launcher {
 
             let completed_attempts = self.task_attempts.get(&task_id).cloned().unwrap_or(0);
             let next_attempt = completed_attempts + 1;
-            let max_total_attempts: u32 = 3; // FIXME(thegenem0): Get from task_def
+            let max_total_attempts = task_def.max_attempts.unwrap_or(3);
 
             if matches!(
                 self.task_states.get(&task_id),
@@ -144,10 +144,8 @@ impl Launcher {
         pipeline_run_id: Uuid,
         tasks_to_launch: Vec<TaskToLaunch>,
     ) -> Result<bool, Error> {
-        let mut handled_launch = false;
-
         if tasks_to_launch.is_empty() {
-            return Ok(handled_launch);
+            return Ok(false);
         }
 
         for task_info in tasks_to_launch {
@@ -158,6 +156,17 @@ impl Launcher {
                 task_info.task_definition.id,
                 task_info.attempt
             );
+
+            let task_run_id = self
+                .run_def_map
+                .get(&task_info.task_definition.id)
+                .cloned()
+                .ok_or_else(|| {
+                    Error::Internal(format!(
+                        "Failed to find TaskRun ID for task ID {}. This is a logic error.",
+                        task_info.task_definition.id
+                    ))
+                })?;
 
             if let Err(e) = self
                 .launch_task_worker(
@@ -174,20 +183,26 @@ impl Launcher {
 
                 self.task_states
                     .insert(task_info.task_definition.id, TaskRunStatus::Failed);
+
                 self.task_attempts
                     .insert(task_info.task_definition.id, task_info.attempt);
 
-                // FIXME(thegenem0):
-                // Add this state update method
-                //  self.state_manager.update_task_run_status(
-                // assessment_run_id, task_info.task_definition.id, task_info.attempt_number, TaskStatus::Failed,
-                // None, Some(Utc::now()), Some(format!("Launch worker failed: {}", e))
-                // ).await?;
+                self.state_manager
+                    .update_task_run_status(
+                        task_run_id,
+                        TaskRunStatus::Failed,
+                        None,
+                        Some(format!("Launch worker failed: {}", e).into()),
+                    )
+                    .await?;
+            } else {
+                self.state_manager
+                    .update_task_run_status(task_run_id, TaskRunStatus::Running, None, None)
+                    .await?;
             }
-            handled_launch = true;
         }
 
-        Ok(handled_launch)
+        Ok(true)
     }
 
     /// Marks tasks that have exceeded their retry count as failed.
@@ -195,13 +210,22 @@ impl Launcher {
         &mut self,
         tasks_to_fail: Vec<TaskExceedingRetries>,
     ) -> Result<bool, Error> {
-        let mut handled_fail = false;
-
         if tasks_to_fail.is_empty() {
-            return Ok(handled_fail);
+            return Ok(false);
         }
 
         for fail_info in tasks_to_fail {
+            let task_run_id = self
+                .run_def_map
+                .get(&fail_info.task_def_id)
+                .cloned()
+                .ok_or_else(|| {
+                    Error::Internal(format!(
+                        "Failed to find TaskRun ID for task ID {}. This is a logic error.",
+                        fail_info.task_def_id
+                    ))
+                })?;
+
             info!(
                 "Launcher [{}]: Task '{}' (ID: {}) exceeded max retries ({}) after {} attempts. Marking as failed.",
                 self.id,
@@ -217,16 +241,18 @@ impl Launcher {
             self.task_attempts
                 .insert(fail_info.task_def_id, fail_info.completed_attempts);
 
-            // FIXME(thegenem0):
-            // Add this state update method
-            // self.state_manager.update_task_run_status(
-            //    fail_info.pipeline_run_id, fail_info.task_id, fail_info.completed_attempts, TaskStatus::Failed,
-            //    None, Some(Utc::now()), Some(format!("Exceeded max retries ({})", fail_info.max_retries_allowed))
-            // ).await?;
-
-            handled_fail = true;
+            self.state_manager
+                .update_task_run_status(
+                    task_run_id,
+                    TaskRunStatus::Failed,
+                    None,
+                    Some(
+                        format!("Exceeded max retries ({})", fail_info.max_retries_allowed).into(),
+                    ),
+                )
+                .await?;
         }
 
-        Ok(handled_fail)
+        Ok(true)
     }
 }

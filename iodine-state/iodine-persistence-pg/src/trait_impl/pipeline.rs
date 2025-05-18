@@ -168,15 +168,15 @@ impl PipelineDbTrait for PostgresStateDb {
                 let execution_ctx: serde_json::Value =
                     task.execution_ctx.clone().try_into().unwrap_or_default();
 
-                return task_definitions::ActiveModel {
+                task_definitions::ActiveModel {
                     id: Set(task.id),
                     pipeline_def_id: Set(task.pipeline_def_id),
                     name: Set(task.name.clone()),
                     description: Set(task.description.clone()),
                     execution_context: Set(execution_ctx),
-                    max_attempts: Set(task.max_attempts.map(|m| m as i32)),
+                    max_attempts: Set(task.max_attempts),
                     depends_on: Set(Some(task.depends_on.clone())),
-                };
+                }
             })
             .collect();
 
@@ -256,11 +256,10 @@ impl PipelineDbTrait for PostgresStateDb {
         initial_run_status: PipelineRunStatus,
     ) -> Result<(), Error> {
         let now: DateTime<FixedOffset> = Utc::now().into();
-        let run_id = Uuid::new_v4();
         let txn = self.conn.begin().await.map_err(db_error_to_domain)?;
 
         let new_run = pipeline_runs::ActiveModel {
-            id: Set(run_id),
+            id: Set(pipeline_run_id),
             pipeline_def_id: Set(pipeline_def_id),
             launcher_id: Set(launcher_id),
             status: Set(domain_pipeline_status_to_db(PipelineRunStatus::Queued)),
@@ -274,7 +273,7 @@ impl PipelineDbTrait for PostgresStateDb {
 
             log_event_direct(
                 &self.conn,
-                Some(run_id),
+                Some(pipeline_run_id),
                 None,
                 EventType::RunFailure,
                 Some(format!(
@@ -294,13 +293,20 @@ impl PipelineDbTrait for PostgresStateDb {
             _ => EventType::RunStart,
         };
 
-        if let Err(db_err) =
-            log_event_in_txn(&txn, Some(run_id), None, run_event_type, None, None).await
+        if let Err(db_err) = log_event_in_txn(
+            &txn,
+            Some(pipeline_run_id),
+            None,
+            run_event_type,
+            None,
+            None,
+        )
+        .await
         {
             txn.rollback().await.map_err(db_error_to_domain)?;
             log_event_direct(
                 &self.conn,
-                Some(run_id),
+                Some(pipeline_run_id),
                 None,
                 EventType::RunFailure,
                 Some(format!("Failed run creation: log event failed: {}", db_err)),

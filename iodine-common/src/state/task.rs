@@ -9,6 +9,7 @@ use crate::{
 use super::base::BaseDbTrait;
 
 #[async_trait]
+#[allow(clippy::too_many_arguments)]
 pub trait TaskDbTrait: BaseDbTrait {
     /// Gets a task definition by `definition_id`
     /// ---
@@ -57,9 +58,10 @@ pub trait TaskDbTrait: BaseDbTrait {
     /// long-running tasks.
     async fn create_task_run(
         &self,
-        run_id: Uuid,
+        task_run_id: Uuid,
         task_def_id: Uuid,
-        attempt: u32,
+        pipeline_run_id: Uuid,
+        attempt: i32,
         status: TaskRunStatus,
         output: Option<serde_json::Value>,
         message: Option<String>,

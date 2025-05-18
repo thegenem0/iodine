@@ -13,6 +13,7 @@ pub mod scheduling;
 pub mod state;
 pub mod util;
 
+#[derive(Debug)]
 pub struct LauncherConfig {
     pub config: serde_json::Value,
     pub scheduler_tick_interval: Option<Duration>,
@@ -42,7 +43,7 @@ pub struct WorkerResult {
     // The ID Launcher assigned to this execution attempt (matches WorkerRequest.worker_id)
     pub assigned_worker_id: Uuid,
     pub task_id: Uuid,
-    pub attempt: u32,
+    pub attempt: i32,
     pub final_status: TaskRunStatus,
     pub message: Option<String>,
 }
@@ -50,7 +51,7 @@ pub struct WorkerResult {
 #[derive(Debug)]
 pub struct ActiveWorkerInfo {
     task_id: Uuid,
-    attempt: u32,
+    attempt: i32,
     provisioned_details: ProvisionedWorkerDetails,
     monitor_cancel_tx: Option<oneshot::Sender<()>>,
     task_name: String,

@@ -17,7 +17,7 @@ pub trait PipelineDbTrait: BaseDbTrait {
     /// Gets the metadata for a specific pipeline definition by `pipeline_id`.
     /// ---
     /// This includes all stored information about the pipeline definition.
-    /// NOTE(_): This gets the full definition
+    /// NOTE(thegenem0): This gets the full definition
     /// and can be expensive for large pipelines
     async fn get_pipeline_definition(
         &self,

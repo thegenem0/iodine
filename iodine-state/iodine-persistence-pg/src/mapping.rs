@@ -18,7 +18,7 @@ use sea_orm::{
 
 const COORDINATOR_STATUS_DB_ENUM_NAME: &str = "coordinator_status";
 const PIPELINE_RUN_STATUS_DB_ENUM_NAME: &str = "pipeline_run_status";
-const TASK_STATUS_DB_ENUM_NAME: &str = "task_status";
+const TASK_STATUS_DB_ENUM_NAME: &str = "task_run_status";
 
 pub(crate) fn db_error_to_domain(e: DbErr) -> Error {
     Error::Database(e.to_string())
@@ -130,7 +130,7 @@ pub(crate) fn pipeline_run_to_domain(model: pipeline_runs::Model) -> PipelineRun
     }
 }
 
-pub(crate) fn task_instance_to_domain(model: task_runs::Model) -> TaskRun {
+pub(crate) fn task_run_to_domain(model: task_runs::Model) -> TaskRun {
     TaskRun {
         id: model.id,
         run_id: model.id,

@@ -248,8 +248,8 @@ impl MigrationTrait for Migration {
                     .table(TaskRun::Table)
                     .if_not_exists()
                     .col(ColumnDef::new(TaskRun::Id).uuid().not_null().primary_key())
-                    .col(ColumnDef::new(TaskRun::PipelineRunId).uuid().not_null())
                     .col(ColumnDef::new(TaskRun::TaskDefId).uuid().not_null())
+                    .col(ColumnDef::new(TaskRun::PipelineRunId).uuid().not_null())
                     .col(
                         ColumnDef::new(TaskRun::Status)
                             .custom(DbTaskRunStatus::name())
@@ -279,7 +279,7 @@ impl MigrationTrait for Migration {
                     )
                     .foreign_key(
                         ForeignKey::create()
-                            .name("fk_task_instance_run")
+                            .name("fk_task_run_pipeline_run")
                             .from(TaskRun::Table, TaskRun::PipelineRunId)
                             .to(PipelineRun::Table, PipelineRun::Id)
                             .on_delete(ForeignKeyAction::Cascade)

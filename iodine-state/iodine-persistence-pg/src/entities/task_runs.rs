@@ -9,8 +9,8 @@ use serde::{Deserialize, Serialize};
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: Uuid,
-    pub pipeline_run_id: Uuid,
     pub task_def_id: Uuid,
+    pub pipeline_run_id: Uuid,
     pub status: TaskRunStatus,
     pub attempts: i32,
     #[sea_orm(column_type = "JsonBinary", nullable)]

@@ -27,13 +27,15 @@ pub struct ManagedLauncher {
     current_run_id: Option<Uuid>,
 }
 
+type LauncherRunResult = Result<(), Error>;
+
 pub struct MonitoredLauncherTask {
     launcher_id: Uuid,
-    handle: JoinHandle<Result<(), Error>>,
+    handle: JoinHandle<LauncherRunResult>,
 }
 
 impl Future for MonitoredLauncherTask {
-    type Output = (Uuid, Result<Result<(), Error>, JoinError>);
+    type Output = (Uuid, Result<LauncherRunResult, JoinError>);
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         match Pin::new(&mut self.handle).poll(cx) {
