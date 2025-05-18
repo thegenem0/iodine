@@ -9,8 +9,8 @@ pub enum Launcher {
     Id,
     #[iden = "coordinator_id"]
     CoordinatorId,
-    #[iden = "assigned_pipeline_id"]
-    AssignedPipelineId,
+    #[iden = "assigned_pipeline_def_id"]
+    AssignedPipelineDefId,
     #[iden = "started_at"]
     StartedAt,
     #[iden = "terminated_at"]

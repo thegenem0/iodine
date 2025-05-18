@@ -6,7 +6,7 @@ use uuid::Uuid;
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct PipelineRun {
     pub id: Uuid,
-    pub definition_id: Uuid,
+    pub pipeline_def_id: Uuid,
     pub status: PipelineRunStatus,
     pub start_time: Option<DateTime<Utc>>,
     pub end_time: Option<DateTime<Utc>>,

@@ -1,13 +1,14 @@
 use crate::entities::{
     coordinators, event_log, pipeline_definitions, pipeline_runs, sea_orm_active_enums,
-    task_definitions, task_instances,
+    task_definitions, task_runs,
 };
 use iodine_common::{
     coordinator::{Coordinator, CoordinatorStatus},
     error::Error,
     event::{EventLogRecord, EventType},
     pipeline::{PipelineBackend, PipelineDefinition, PipelineInfo, PipelineRun, PipelineRunStatus},
-    task::{TaskDefinition, TaskInstance, TaskStatus},
+    resource_manager::ExecutionContext,
+    task::{TaskDefinition, TaskRun, TaskRunStatus},
 };
 use sea_orm::{
     DbErr,
@@ -67,18 +68,22 @@ pub(crate) fn coordinator_status_as_expr(model: CoordinatorStatus) -> SimpleExpr
 pub(crate) fn pipeline_definition_to_domain(
     pipeline_definition: pipeline_definitions::Model,
     tasks_definitions: Vec<task_definitions::Model>,
-) -> PipelineDefinition {
+) -> Result<PipelineDefinition, Error> {
     let info = pipeline_info_to_domain(pipeline_definition);
 
-    let task_defs: Vec<TaskDefinition> = tasks_definitions
-        .into_iter()
-        .map(task_definition_to_domain)
-        .collect();
+    let mut task_defs: Vec<TaskDefinition> = Vec::new();
 
-    PipelineDefinition {
+    for task_def in tasks_definitions.into_iter() {
+        let task_def = task_definition_to_domain(task_def)
+            .map_err(|e| Error::Internal(format!("Failed to parse task definition: {}", e)))?;
+
+        task_defs.push(task_def);
+    }
+
+    Ok(PipelineDefinition {
         info,
         task_definitions: task_defs,
-    }
+    })
 }
 
 pub(crate) fn pipeline_info_to_domain(model: pipeline_definitions::Model) -> PipelineInfo {
@@ -96,22 +101,27 @@ pub(crate) fn pipeline_info_to_domain(model: pipeline_definitions::Model) -> Pip
     }
 }
 
-pub(crate) fn task_definition_to_domain(model: task_definitions::Model) -> TaskDefinition {
-    TaskDefinition {
+pub(crate) fn task_definition_to_domain(
+    model: task_definitions::Model,
+) -> Result<TaskDefinition, Error> {
+    let execution_ctx: ExecutionContext =
+        serde_json::from_value(model.execution_context).map_err(Error::Serialization)?;
+
+    Ok(TaskDefinition {
         id: model.id,
-        pipeline_id: model.pipeline_id,
+        pipeline_def_id: model.pipeline_def_id,
         name: model.name,
         description: model.description,
-        config_schema: model.config_schema,
-        user_code_metadata: model.user_code_metadata,
+        execution_ctx,
+        max_attempts: model.max_attempts,
         depends_on: model.depends_on.unwrap_or_default(),
-    }
+    })
 }
 
 pub(crate) fn pipeline_run_to_domain(model: pipeline_runs::Model) -> PipelineRun {
     PipelineRun {
         id: model.id,
-        definition_id: model.definition_id,
+        pipeline_def_id: model.pipeline_def_id,
         status: pipeline_status_to_domain(model.status),
         start_time: model.start_time.map(|t| t.into()),
         end_time: model.end_time.map(|t| t.into()),
@@ -120,11 +130,11 @@ pub(crate) fn pipeline_run_to_domain(model: pipeline_runs::Model) -> PipelineRun
     }
 }
 
-pub(crate) fn task_instance_to_domain(model: task_instances::Model) -> TaskInstance {
-    TaskInstance {
+pub(crate) fn task_instance_to_domain(model: task_runs::Model) -> TaskRun {
+    TaskRun {
         id: model.id,
-        run_id: model.run_id,
-        definition_id: model.definition_id,
+        run_id: model.id,
+        task_def_id: model.task_def_id,
         status: task_status_to_domain(model.status),
         attempts: model.attempts,
         start_time: model.start_time.map(|t| t.into()),
@@ -145,8 +155,8 @@ pub(crate) fn event_log_to_domain(model: event_log::Model) -> Result<EventLogRec
 
     Ok(EventLogRecord {
         event_id: model.event_id,
-        run_id: model.run_id,
-        task_id: model.task_id,
+        run_id: model.pipeline_run_id,
+        task_id: model.task_run_id,
         timestamp: model.timestamp.into(),
         event_type,
         message: model.message,
@@ -190,34 +200,36 @@ pub(crate) fn pipeline_status_as_expr(model: PipelineRunStatus) -> SimpleExpr {
     Expr::val(model.to_string()).cast_as(Alias::new(PIPELINE_RUN_STATUS_DB_ENUM_NAME))
 }
 
-pub(crate) fn task_status_to_domain(model: sea_orm_active_enums::TaskStatus) -> TaskStatus {
+pub(crate) fn task_status_to_domain(model: sea_orm_active_enums::TaskRunStatus) -> TaskRunStatus {
     match model {
-        sea_orm_active_enums::TaskStatus::Pending => TaskStatus::Pending,
-        sea_orm_active_enums::TaskStatus::Queued => TaskStatus::Queued,
-        sea_orm_active_enums::TaskStatus::Running => TaskStatus::Running,
-        sea_orm_active_enums::TaskStatus::Retrying => TaskStatus::Retrying,
-        sea_orm_active_enums::TaskStatus::Succeeded => TaskStatus::Succeeded,
-        sea_orm_active_enums::TaskStatus::Failed => TaskStatus::Failed,
-        sea_orm_active_enums::TaskStatus::Cancelling => TaskStatus::Cancelling,
-        sea_orm_active_enums::TaskStatus::Cancelled => TaskStatus::Cancelled,
-        sea_orm_active_enums::TaskStatus::Skipped => TaskStatus::Skipped,
+        sea_orm_active_enums::TaskRunStatus::Pending => TaskRunStatus::Pending,
+        sea_orm_active_enums::TaskRunStatus::Queued => TaskRunStatus::Queued,
+        sea_orm_active_enums::TaskRunStatus::Running => TaskRunStatus::Running,
+        sea_orm_active_enums::TaskRunStatus::Retrying => TaskRunStatus::Retrying,
+        sea_orm_active_enums::TaskRunStatus::Succeeded => TaskRunStatus::Succeeded,
+        sea_orm_active_enums::TaskRunStatus::Failed => TaskRunStatus::Failed,
+        sea_orm_active_enums::TaskRunStatus::Cancelling => TaskRunStatus::Cancelling,
+        sea_orm_active_enums::TaskRunStatus::Cancelled => TaskRunStatus::Cancelled,
+        sea_orm_active_enums::TaskRunStatus::Skipped => TaskRunStatus::Skipped,
     }
 }
 
-pub(crate) fn domain_task_status_to_db(model: TaskStatus) -> sea_orm_active_enums::TaskStatus {
+pub(crate) fn domain_task_status_to_db(
+    model: TaskRunStatus,
+) -> sea_orm_active_enums::TaskRunStatus {
     match model {
-        TaskStatus::Pending => sea_orm_active_enums::TaskStatus::Pending,
-        TaskStatus::Queued => sea_orm_active_enums::TaskStatus::Queued,
-        TaskStatus::Running => sea_orm_active_enums::TaskStatus::Running,
-        TaskStatus::Retrying => sea_orm_active_enums::TaskStatus::Retrying,
-        TaskStatus::Succeeded => sea_orm_active_enums::TaskStatus::Succeeded,
-        TaskStatus::Failed => sea_orm_active_enums::TaskStatus::Failed,
-        TaskStatus::Cancelling => sea_orm_active_enums::TaskStatus::Cancelling,
-        TaskStatus::Cancelled => sea_orm_active_enums::TaskStatus::Cancelled,
-        TaskStatus::Skipped => sea_orm_active_enums::TaskStatus::Skipped,
+        TaskRunStatus::Pending => sea_orm_active_enums::TaskRunStatus::Pending,
+        TaskRunStatus::Queued => sea_orm_active_enums::TaskRunStatus::Queued,
+        TaskRunStatus::Running => sea_orm_active_enums::TaskRunStatus::Running,
+        TaskRunStatus::Retrying => sea_orm_active_enums::TaskRunStatus::Retrying,
+        TaskRunStatus::Succeeded => sea_orm_active_enums::TaskRunStatus::Succeeded,
+        TaskRunStatus::Failed => sea_orm_active_enums::TaskRunStatus::Failed,
+        TaskRunStatus::Cancelling => sea_orm_active_enums::TaskRunStatus::Cancelling,
+        TaskRunStatus::Cancelled => sea_orm_active_enums::TaskRunStatus::Cancelled,
+        TaskRunStatus::Skipped => sea_orm_active_enums::TaskRunStatus::Skipped,
     }
 }
 
-pub(crate) fn task_status_as_expr(model: TaskStatus) -> SimpleExpr {
+pub(crate) fn task_status_as_expr(model: TaskRunStatus) -> SimpleExpr {
     Expr::val(model.to_string()).cast_as(Alias::new(TASK_STATUS_DB_ENUM_NAME))
 }

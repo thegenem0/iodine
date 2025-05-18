@@ -36,6 +36,22 @@
       '';
     };
 
+    migrate-up = {
+      exec = ''
+        cd ./iodine-state/iodine-migration
+        cargo run
+        cd -
+      '';
+    };
+
+    migrate-down = {
+      exec = ''
+        cd ./iodine-state/iodine-migration
+        cargo run -- down
+        cd -
+      '';
+    };
+
     sanitize = {
       exec = ''
         RUSTFLAGS="-Z sanitizer=thread" cargo +nightly run --target x86_64-unknown-linux-gnu

@@ -8,15 +8,14 @@ use serde::{Deserialize, Serialize};
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: Uuid,
-    pub pipeline_id: Uuid,
+    pub pipeline_def_id: Uuid,
     #[sea_orm(column_type = "Text")]
     pub name: String,
     #[sea_orm(column_type = "Text", nullable)]
     pub description: Option<String>,
-    #[sea_orm(column_type = "JsonBinary", nullable)]
-    pub config_schema: Option<Json>,
-    #[sea_orm(column_type = "JsonBinary", nullable)]
-    pub user_code_metadata: Option<Json>,
+    #[sea_orm(column_type = "JsonBinary")]
+    pub execution_context: Json,
+    pub max_attempts: Option<i32>,
     pub depends_on: Option<Vec<Uuid>>,
 }
 
@@ -24,7 +23,7 @@ pub struct Model {
 pub enum Relation {
     #[sea_orm(
         belongs_to = "super::pipeline_definitions::Entity",
-        from = "Column::PipelineId",
+        from = "Column::PipelineDefId",
         to = "super::pipeline_definitions::Column::Id",
         on_update = "Cascade",
         on_delete = "Cascade"

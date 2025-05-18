@@ -1703,6 +1703,8 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "chrono",
+ "prost",
+ "prost-types",
  "serde",
  "serde_json",
  "strum 0.27.1",
@@ -1771,6 +1773,8 @@ dependencies = [
  "clap",
  "iodine-common",
  "iodine-protobuf",
+ "prost",
+ "prost-types",
  "serde",
  "serde_json",
  "serde_yaml",

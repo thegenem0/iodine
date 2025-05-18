@@ -3,6 +3,7 @@ syntax = "proto3";
 package iodine.v1;
 
 import "google/protobuf/struct.proto";
+import "google/protobuf/duration.proto";
 
 enum TaskStatusProto {
   TASK_STATUS_PROTO_UNSPECIFIED = 0;
@@ -31,7 +32,36 @@ message TaskDefinitionProto {
   string id = 1;
   string name = 2;
   string description = 3;
-  google.protobuf.Struct config_schema = 4;
-  google.protobuf.Struct user_code_metadata = 6;
-  repeated string depends_on = 7;
+  ExecutionContextProto execution_context = 4;
+  optional int32 max_attempts = 5;
+  repeated string depends_on = 6;
+}
+
+enum ExecutionContextKindProto {
+  EXECUTION_CONTEXT_KIND_UNSPECIFIED = 0;
+  EXECUTION_CONTEXT_KIND_LOCAL_PROCESS = 1;
+  EXECUTION_CONTEXT_KIND_DOCKER = 2;
+}
+
+message ExecutionContextProto {
+  oneof context_variant {
+    LocalProcessContextDataProto local_process = 1;
+    DockerContextDataProto docker = 2;
+  }
+}
+
+message LocalProcessContextDataProto {
+  repeated string entry_point = 1;
+  repeated string args = 2;
+  map<string, string> env_vars = 3;
+  google.protobuf.Duration exec_timeout = 4;
+}
+
+message DockerContextDataProto {
+  repeated string entry_point = 1;
+  repeated string args = 2;
+  map<string, string> env_vars = 3;
+  google.protobuf.Duration exec_timeout = 4;
+  string image_uri = 5;
+  map<string, string> labels = 6;
 }

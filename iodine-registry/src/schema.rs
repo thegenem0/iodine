@@ -21,8 +21,10 @@ pub struct Step {
     pub environment: Vec<KvPair>,
     pub labels: Vec<KvPair>,
     pub executor_config: ExecutorConfig,
+    pub max_attempts: Option<i32>,
     pub working_directory: String,
     pub entrypoint: String,
+    pub depends_on: Vec<String>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -35,16 +37,20 @@ pub enum ExecutorConfig {
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct LocalProcessConfig {
+    pub entry_point: Vec<String>,
+    pub args: Vec<String>,
+    pub env_vars: Vec<KvPair>,
+    pub exec_timeout: Option<i64>,
     pub cpu_request: Option<String>,
     pub memory_request: Option<String>,
-    pub timeout_seconds: Option<u64>,
+    pub timeout_seconds: Option<i64>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct DockerConfig {
     pub image_uri: String,
     pub entrypoint: Vec<String>,
-    pub timeout_seconds: Option<u64>,
+    pub timeout_seconds: Option<i64>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -52,7 +58,7 @@ pub struct CloudRunJobConfig {
     pub region: String,
     pub project_id: String,
     pub job_name: String,
-    pub timeout_seconds: Option<u64>,
+    pub timeout_seconds: Option<i64>,
 }
 
 #[derive(Debug, Deserialize, Clone)]

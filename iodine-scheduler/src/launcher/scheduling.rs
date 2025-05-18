@@ -1,6 +1,6 @@
 use iodine_common::{
     error::Error,
-    task::{TaskDefinition, TaskStatus},
+    task::{TaskDefinition, TaskRunStatus},
 };
 use tracing::{error, info};
 use uuid::Uuid;
@@ -109,7 +109,7 @@ impl Launcher {
 
             if matches!(
                 self.task_states.get(&task_id),
-                Some(TaskStatus::Pending) | Some(TaskStatus::Retrying) | None
+                Some(TaskRunStatus::Pending) | Some(TaskRunStatus::Retrying) | None
             ) && !self.is_task_active(task_id)
             {
                 if next_attempt <= max_total_attempts {
@@ -118,7 +118,7 @@ impl Launcher {
                         pipeline_run_id: current_pipeline_run_id,
                         attempt: next_attempt,
                     });
-                } else if self.task_states.get(&task_id) != Some(&TaskStatus::Failed) {
+                } else if self.task_states.get(&task_id) != Some(&TaskRunStatus::Failed) {
                     // Already exceeded max attempts and not yet marked as failed
                     tasks_to_fail.push(TaskExceedingRetries {
                         task_def_id: task_id,
@@ -173,7 +173,7 @@ impl Launcher {
                 );
 
                 self.task_states
-                    .insert(task_info.task_definition.id, TaskStatus::Failed);
+                    .insert(task_info.task_definition.id, TaskRunStatus::Failed);
                 self.task_attempts
                     .insert(task_info.task_definition.id, task_info.attempt);
 
@@ -212,7 +212,7 @@ impl Launcher {
             );
 
             self.task_states
-                .insert(fail_info.task_def_id, TaskStatus::Failed);
+                .insert(fail_info.task_def_id, TaskRunStatus::Failed);
 
             self.task_attempts
                 .insert(fail_info.task_def_id, fail_info.completed_attempts);

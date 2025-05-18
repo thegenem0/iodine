@@ -7,15 +7,15 @@ use crate::{entities::event_log, mapping::db_error_to_domain};
 
 pub(crate) async fn log_event_in_txn(
     txn: &DatabaseTransaction,
-    run_id: Option<Uuid>,
-    task_id: Option<Uuid>,
+    pipeline_run_id: Option<Uuid>,
+    task_run_id: Option<Uuid>,
     event_type: EventType,
     message: Option<String>,
     metadata: Option<serde_json::Value>,
 ) -> Result<(), DbErr> {
     let event = event_log::ActiveModel {
-        run_id: Set(run_id),
-        task_id: Set(task_id),
+        pipeline_run_id: Set(pipeline_run_id),
+        task_run_id: Set(task_run_id),
         event_type: Set(event_type.to_string()),
         message: Set(message),
         metadata: Set(metadata),
@@ -30,15 +30,15 @@ pub(crate) async fn log_event_in_txn(
 
 pub(crate) async fn log_event_direct(
     conn: &sea_orm::DatabaseConnection,
-    run_id: Option<Uuid>,
-    task_id: Option<Uuid>,
+    pipeline_run_id: Option<Uuid>,
+    task_run_id: Option<Uuid>,
     event_type: EventType,
     message: Option<String>,
     metadata: Option<serde_json::Value>,
 ) -> Result<(), Error> {
     let event = event_log::ActiveModel {
-        run_id: Set(run_id),
-        task_id: Set(task_id),
+        pipeline_run_id: Set(pipeline_run_id),
+        task_run_id: Set(task_run_id),
         event_type: Set(event_type.to_string()),
         message: Set(message),
         metadata: Set(metadata),

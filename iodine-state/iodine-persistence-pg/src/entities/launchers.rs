@@ -10,7 +10,7 @@ pub struct Model {
     pub id: Uuid,
     #[sea_orm(primary_key, auto_increment = false)]
     pub coordinator_id: Uuid,
-    pub assigned_pipeline_id: Option<Uuid>,
+    pub assigned_pipeline_def_id: Option<Uuid>,
     pub started_at: Option<DateTimeWithTimeZone>,
     pub terminated_at: Option<DateTimeWithTimeZone>,
 }

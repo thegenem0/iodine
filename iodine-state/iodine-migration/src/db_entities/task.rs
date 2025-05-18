@@ -7,30 +7,30 @@ pub enum TaskDefinition {
     Table,
     #[iden = "id"]
     Id,
-    #[iden = "pipeline_id"]
-    PipelineId,
+    #[iden = "pipeline_def_id"]
+    PipelineDefId,
     #[iden = "name"]
     Name,
     #[iden = "description"]
     Description,
-    #[iden = "config_schema"]
-    ConfigSchema,
-    #[iden = "user_code_metadata"]
-    UserCodeMetadata,
+    #[iden = "execution_context"]
+    ExecutionContext,
+    #[iden = "max_attempts"]
+    MaxAttempts,
     #[iden = "depends_on"]
     DependsOn,
 }
 
 #[derive(Iden)]
-#[iden = "task_instances"]
-pub enum TaskInstance {
+#[iden = "task_runs"]
+pub enum TaskRun {
     Table,
     #[iden = "id"]
     Id,
-    #[iden = "run_id"]
-    RunId,
-    #[iden = "definition_id"]
-    DefinitionId,
+    #[iden = "pipeline_run_id"]
+    PipelineRunId,
+    #[iden = "task_def_id"]
+    TaskDefId,
     #[iden = "status"]
     Status,
     #[iden = "attempts"]
@@ -50,8 +50,8 @@ pub enum TaskInstance {
 }
 
 #[derive(EnumIter, DeriveActiveEnum)]
-#[sea_orm(rs_type = "String", db_type = "Enum", enum_name = "task_status")]
-pub enum DbTaskStatus {
+#[sea_orm(rs_type = "String", db_type = "Enum", enum_name = "task_run_status")]
+pub enum DbTaskRunStatus {
     #[sea_orm(string_value = "PENDING")]
     Pending,
     #[sea_orm(string_value = "QUEUED")]

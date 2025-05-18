@@ -4,8 +4,8 @@ use sea_orm_migration::{
 };
 
 use crate::db_entities::{
-    Coordinator, DbCoordinatorStatus, DbPipelineRunStatus, DbTaskStatus, EventLog, Launcher,
-    PipelineDefinition, PipelineRun, TaskDefinition, TaskInstance,
+    Coordinator, DbCoordinatorStatus, DbPipelineRunStatus, DbTaskRunStatus, EventLog, Launcher,
+    PipelineDefinition, PipelineRun, TaskDefinition, TaskRun,
 };
 
 const IDX_COORDINATORS_IS_LEADER: &str = "idx_coordinators_is_leader";
@@ -62,7 +62,7 @@ impl MigrationTrait for Migration {
                 .await?;
 
             manager
-                .create_type(schema.create_enum_from_active_enum::<DbTaskStatus>())
+                .create_type(schema.create_enum_from_active_enum::<DbTaskRunStatus>())
                 .await?;
         }
 
@@ -119,7 +119,7 @@ impl MigrationTrait for Migration {
                     )
                     .col(ColumnDef::new(Launcher::Id).uuid().not_null())
                     .col(ColumnDef::new(Launcher::CoordinatorId).uuid().not_null())
-                    .col(ColumnDef::new(Launcher::AssignedPipelineId).uuid())
+                    .col(ColumnDef::new(Launcher::AssignedPipelineDefId).uuid())
                     .col(ColumnDef::new(Launcher::StartedAt).timestamp_with_time_zone())
                     .col(ColumnDef::new(Launcher::TerminatedAt).timestamp_with_time_zone())
                     .to_owned(),
@@ -169,7 +169,7 @@ impl MigrationTrait for Migration {
                             .not_null()
                             .primary_key(),
                     )
-                    .col(ColumnDef::new(PipelineRun::DefinitionId).uuid().not_null())
+                    .col(ColumnDef::new(PipelineRun::PipelineDefId).uuid().not_null())
                     .col(ColumnDef::new(PipelineRun::LauncherId).uuid().not_null())
                     .col(
                         ColumnDef::new(PipelineRun::Status)
@@ -193,7 +193,7 @@ impl MigrationTrait for Migration {
                     .foreign_key(
                         ForeignKey::create()
                             .name("fk_pipeline_run_def")
-                            .from(PipelineRun::Table, PipelineRun::DefinitionId)
+                            .from(PipelineRun::Table, PipelineRun::PipelineDefId)
                             .to(PipelineDefinition::Table, PipelineDefinition::Id)
                             // TODO(thegenem0):
                             // RESTRICT if preventing deletion of definitions
@@ -216,16 +216,24 @@ impl MigrationTrait for Migration {
                             .not_null()
                             .primary_key(),
                     )
-                    .col(ColumnDef::new(TaskDefinition::PipelineId).uuid().not_null())
+                    .col(
+                        ColumnDef::new(TaskDefinition::PipelineDefId)
+                            .uuid()
+                            .not_null(),
+                    )
                     .col(ColumnDef::new(TaskDefinition::Name).text().not_null())
                     .col(ColumnDef::new(TaskDefinition::Description).text())
-                    .col(ColumnDef::new(TaskDefinition::ConfigSchema).json_binary())
-                    .col(ColumnDef::new(TaskDefinition::UserCodeMetadata).json_binary())
+                    .col(
+                        ColumnDef::new(TaskDefinition::ExecutionContext)
+                            .json_binary()
+                            .not_null(),
+                    )
+                    .col(ColumnDef::new(TaskDefinition::MaxAttempts).integer())
                     .col(ColumnDef::new(TaskDefinition::DependsOn).array(ColumnType::Uuid))
                     .foreign_key(
                         ForeignKey::create()
                             .name("fk_task_def_pipeline")
-                            .from(TaskDefinition::Table, TaskDefinition::PipelineId)
+                            .from(TaskDefinition::Table, TaskDefinition::PipelineDefId)
                             .to(PipelineDefinition::Table, PipelineDefinition::Id)
                             .on_delete(ForeignKeyAction::Cascade)
                             .on_update(ForeignKeyAction::Cascade),
@@ -237,39 +245,34 @@ impl MigrationTrait for Migration {
         manager
             .create_table(
                 Table::create()
-                    .table(TaskInstance::Table)
+                    .table(TaskRun::Table)
                     .if_not_exists()
+                    .col(ColumnDef::new(TaskRun::Id).uuid().not_null().primary_key())
+                    .col(ColumnDef::new(TaskRun::PipelineRunId).uuid().not_null())
+                    .col(ColumnDef::new(TaskRun::TaskDefId).uuid().not_null())
                     .col(
-                        ColumnDef::new(TaskInstance::Id)
-                            .uuid()
-                            .not_null()
-                            .primary_key(),
-                    )
-                    .col(ColumnDef::new(TaskInstance::RunId).uuid().not_null())
-                    .col(ColumnDef::new(TaskInstance::DefinitionId).uuid().not_null())
-                    .col(
-                        ColumnDef::new(TaskInstance::Status)
-                            .custom(DbTaskStatus::name())
+                        ColumnDef::new(TaskRun::Status)
+                            .custom(DbTaskRunStatus::name())
                             .not_null(),
                     )
                     .col(
-                        ColumnDef::new(TaskInstance::Attempts)
+                        ColumnDef::new(TaskRun::Attempts)
                             .integer()
                             .not_null()
                             .default(0),
                     )
-                    .col(ColumnDef::new(TaskInstance::OutputMetadata).json_binary())
-                    .col(ColumnDef::new(TaskInstance::Message).text())
-                    .col(ColumnDef::new(TaskInstance::StartTime).timestamp_with_time_zone())
-                    .col(ColumnDef::new(TaskInstance::EndTime).timestamp_with_time_zone())
+                    .col(ColumnDef::new(TaskRun::OutputMetadata).json_binary())
+                    .col(ColumnDef::new(TaskRun::Message).text())
+                    .col(ColumnDef::new(TaskRun::StartTime).timestamp_with_time_zone())
+                    .col(ColumnDef::new(TaskRun::EndTime).timestamp_with_time_zone())
                     .col(
-                        ColumnDef::new(TaskInstance::CreatedAt)
+                        ColumnDef::new(TaskRun::CreatedAt)
                             .timestamp_with_time_zone()
                             .not_null()
                             .default(Expr::current_timestamp()),
                     )
                     .col(
-                        ColumnDef::new(TaskInstance::UpdatedAt)
+                        ColumnDef::new(TaskRun::UpdatedAt)
                             .timestamp_with_time_zone()
                             .not_null()
                             .default(Expr::current_timestamp()),
@@ -277,7 +280,7 @@ impl MigrationTrait for Migration {
                     .foreign_key(
                         ForeignKey::create()
                             .name("fk_task_instance_run")
-                            .from(TaskInstance::Table, TaskInstance::RunId)
+                            .from(TaskRun::Table, TaskRun::PipelineRunId)
                             .to(PipelineRun::Table, PipelineRun::Id)
                             .on_delete(ForeignKeyAction::Cascade)
                             .on_update(ForeignKeyAction::Cascade),
@@ -303,8 +306,8 @@ impl MigrationTrait for Migration {
                             .not_null()
                             .default(Expr::current_timestamp()),
                     )
-                    .col(ColumnDef::new(EventLog::RunId).uuid())
-                    .col(ColumnDef::new(EventLog::TaskId).uuid())
+                    .col(ColumnDef::new(EventLog::PipelineRunId).uuid())
+                    .col(ColumnDef::new(EventLog::TaskRunId).uuid())
                     .col(ColumnDef::new(EventLog::EventType).text().not_null())
                     .col(ColumnDef::new(EventLog::Message).text())
                     .col(ColumnDef::new(EventLog::Metadata).json_binary())
@@ -357,7 +360,7 @@ impl MigrationTrait for Migration {
                 Index::create()
                     .name(IDX_PIPELINE_RUNS_DEFINITION_ID)
                     .table(PipelineRun::Table)
-                    .col(PipelineRun::DefinitionId)
+                    .col(PipelineRun::PipelineDefId)
                     .to_owned(),
             )
             .await?;
@@ -377,7 +380,7 @@ impl MigrationTrait for Migration {
                 Index::create()
                     .name(IDX_TASK_DEF_PIPELINE_ID)
                     .table(TaskDefinition::Table)
-                    .col(TaskDefinition::PipelineId)
+                    .col(TaskDefinition::PipelineDefId)
                     .to_owned(),
             )
             .await?;
@@ -386,9 +389,9 @@ impl MigrationTrait for Migration {
             .create_index(
                 Index::create()
                     .name(IDX_TASK_INSTANCES_RUN_ID_STATUS)
-                    .table(TaskInstance::Table)
-                    .col(TaskInstance::RunId)
-                    .col(TaskInstance::Status)
+                    .table(TaskRun::Table)
+                    .col(TaskRun::PipelineRunId)
+                    .col(TaskRun::Status)
                     .to_owned(),
             )
             .await?;
@@ -397,8 +400,8 @@ impl MigrationTrait for Migration {
             .create_index(
                 Index::create()
                     .name(IDX_TASK_INSTANCES_STATUS)
-                    .table(TaskInstance::Table)
-                    .col(TaskInstance::Status)
+                    .table(TaskRun::Table)
+                    .col(TaskRun::Status)
                     .to_owned(),
             )
             .await?;
@@ -407,9 +410,9 @@ impl MigrationTrait for Migration {
             .create_index(
                 Index::create()
                     .name(IDX_TASK_INSTANCES_RUN_ID_DEFINITION_ID)
-                    .table(TaskInstance::Table)
-                    .col(TaskInstance::RunId)
-                    .col(TaskInstance::DefinitionId)
+                    .table(TaskRun::Table)
+                    .col(TaskRun::PipelineRunId)
+                    .col(TaskRun::TaskDefId)
                     .to_owned(),
             )
             .await?;
@@ -418,8 +421,8 @@ impl MigrationTrait for Migration {
             .create_index(
                 Index::create()
                     .name(IDX_TASK_INSTANCES_UPDATED_AT)
-                    .table(TaskInstance::Table)
-                    .col(TaskInstance::UpdatedAt)
+                    .table(TaskRun::Table)
+                    .col(TaskRun::UpdatedAt)
                     .to_owned(),
             )
             .await?;
@@ -429,7 +432,7 @@ impl MigrationTrait for Migration {
                 Index::create()
                     .name(IDX_EVENT_LOG_RUN_ID_TIMESTAMP)
                     .table(EventLog::Table)
-                    .col(EventLog::RunId)
+                    .col(EventLog::PipelineRunId)
                     .col(EventLog::Timestamp)
                     .to_owned(),
             )
@@ -440,7 +443,7 @@ impl MigrationTrait for Migration {
                 Index::create()
                     .name(IDX_EVENT_LOG_TASK_ID_TIMESTAMP)
                     .table(EventLog::Table)
-                    .col(EventLog::TaskId)
+                    .col(EventLog::TaskRunId)
                     .col(EventLog::Timestamp)
                     .to_owned(),
             )
@@ -483,12 +486,7 @@ impl MigrationTrait for Migration {
             .await?;
 
         manager
-            .drop_table(
-                Table::drop()
-                    .table(TaskInstance::Table)
-                    .if_exists()
-                    .to_owned(),
-            )
+            .drop_table(Table::drop().table(TaskRun::Table).if_exists().to_owned())
             .await?;
 
         manager
@@ -554,7 +552,7 @@ impl MigrationTrait for Migration {
                 .await?;
 
             manager
-                .drop_type(Type::drop().name(DbTaskStatus::name()).to_owned())
+                .drop_type(Type::drop().name(DbTaskRunStatus::name()).to_owned())
                 .await?;
 
             manager

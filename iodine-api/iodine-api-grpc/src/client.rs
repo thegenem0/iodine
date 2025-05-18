@@ -14,6 +14,8 @@ use iodine_protobuf::{
 };
 use uuid::Uuid;
 
+use crate::mapping::map_exec_ctx_to_domain;
+
 pub struct GrpcClient {
     registry: PipelineRegistry,
     inner_client: PipelineRegistryServiceClient<tonic::transport::Channel>,
@@ -87,13 +89,20 @@ impl GrpcClient {
                     .collect::<Result<Vec<Uuid>, _>>()
                     .map_err(|e| Error::Internal(format!("Failed to parse task ID: {}", e)))?;
 
+                let exec_ctx = match task_def.execution_context {
+                    Some(exec_ctx) => map_exec_ctx_to_domain(exec_ctx),
+                    None => Err(Error::Internal(
+                        "Task execution context is missing".to_string(),
+                    ))?,
+                };
+
                 let task_def = TaskDefinition {
                     id: task_id,
-                    pipeline_id,
+                    pipeline_def_id: pipeline_id,
                     name: task_def.name,
                     description: Some(task_def.description),
-                    config_schema: task_def.config_schema.map(prost_struct_to_json_value),
-                    user_code_metadata: task_def.user_code_metadata.map(prost_struct_to_json_value),
+                    execution_ctx: exec_ctx,
+                    max_attempts: task_def.max_attempts,
                     depends_on: depends_on_ids,
                 };
 

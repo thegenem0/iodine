@@ -4,14 +4,14 @@ use iodine_common::{
     error::Error,
     event::EventType,
     state::TaskDbTrait,
-    task::{TaskDefinition, TaskInstance, TaskStatus},
+    task::{TaskDefinition, TaskRun, TaskRunStatus},
 };
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, TransactionTrait, prelude::Expr};
 use uuid::Uuid;
 
 use crate::{
     db::PostgresStateDb,
-    entities::{task_definitions, task_instances},
+    entities::{task_definitions, task_runs},
     event_logging::{log_event_direct, log_event_in_txn},
     mapping::{
         db_error_to_domain, domain_task_status_to_db, task_definition_to_domain,
@@ -24,41 +24,44 @@ use crate::{
 impl TaskDbTrait for PostgresStateDb {
     async fn get_task_definition(
         &self,
-        definition_id: Uuid,
+        task_def_id: Uuid,
     ) -> Result<Option<TaskDefinition>, Error> {
-        let maybe_model = task_definitions::Entity::find_by_id(definition_id)
+        let maybe_model = task_definitions::Entity::find_by_id(task_def_id)
             .one(&self.conn)
             .await
             .map_err(db_error_to_domain)?;
 
-        Ok(maybe_model.map(task_definition_to_domain))
+        let model = maybe_model.map(task_definition_to_domain).transpose()?;
+
+        Ok(model)
     }
 
     async fn list_task_definitions(
         &self,
-        pipeline_id: Option<Uuid>,
+        pipeline_def_id: Option<Uuid>,
     ) -> Result<(Vec<TaskDefinition>, u64), Error> {
         let mut query = task_definitions::Entity::find();
 
-        if let Some(pipeline_id) = pipeline_id {
-            query = query.filter(task_definitions::Column::PipelineId.eq(pipeline_id));
+        if let Some(def_id) = pipeline_def_id {
+            query = query.filter(task_definitions::Column::PipelineDefId.eq(def_id));
         }
 
         let definitions = query.all(&self.conn).await.map_err(db_error_to_domain)?;
 
         let total_count = definitions.len();
 
-        Ok((
-            definitions
-                .into_iter()
-                .map(task_definition_to_domain)
-                .collect(),
-            total_count as u64,
-        ))
+        let mut models = Vec::new();
+
+        for def in definitions {
+            let model = task_definition_to_domain(def)?;
+            models.push(model);
+        }
+
+        Ok((models, total_count as u64))
     }
 
-    async fn get_task_instance(&self, task_id: Uuid) -> Result<Option<TaskInstance>, Error> {
-        let maybe_model = task_instances::Entity::find_by_id(task_id)
+    async fn get_task_run(&self, task_run_id: Uuid) -> Result<Option<TaskRun>, Error> {
+        let maybe_model = task_runs::Entity::find_by_id(task_run_id)
             .one(&self.conn)
             .await
             .map_err(db_error_to_domain)?;
@@ -66,14 +69,14 @@ impl TaskDbTrait for PostgresStateDb {
         Ok(maybe_model.map(task_instance_to_domain))
     }
 
-    async fn list_task_instances(
+    async fn list_task_runs(
         &self,
-        run_id: Option<Uuid>,
-    ) -> Result<(Vec<TaskInstance>, u64), Error> {
-        let mut query = task_instances::Entity::find();
+        pipeline_run_id: Option<Uuid>,
+    ) -> Result<(Vec<TaskRun>, u64), Error> {
+        let mut query = task_runs::Entity::find();
 
-        if let Some(run_id) = run_id {
-            query = query.filter(task_instances::Column::RunId.eq(run_id));
+        if let Some(run_id) = pipeline_run_id {
+            query = query.filter(task_runs::Column::PipelineRunId.eq(run_id));
         }
 
         let instances = query.all(&self.conn).await.map_err(db_error_to_domain)?;
@@ -86,93 +89,88 @@ impl TaskDbTrait for PostgresStateDb {
         ))
     }
 
-    async fn update_task_status(
+    async fn update_task_run_status(
         &self,
-        task_id: Uuid,
-        new_status: TaskStatus,
+        task_run_id: Uuid,
+        new_status: TaskRunStatus,
         metadata: Option<serde_json::Value>,
         error_data: Option<serde_json::Value>,
     ) -> Result<(), Error> {
-        let task_instance = task_instances::Entity::find_by_id(task_id)
+        let task_run = task_runs::Entity::find_by_id(task_run_id)
             .one(&self.conn)
             .await
             .map_err(db_error_to_domain)?
             .ok_or_else(|| Error::NotFound {
                 resource_type: "TaskInstance".into(),
-                resource_id: task_id.to_string(),
+                resource_id: task_run_id.to_string(),
             })?;
 
         let now: DateTime<FixedOffset> = Utc::now().into();
         let txn = self.conn.begin().await.map_err(db_error_to_domain)?;
 
-        let mut update_query = task_instances::Entity::update_many()
+        let mut update_query = task_runs::Entity::update_many()
+            .col_expr(task_runs::Column::Status, task_status_as_expr(new_status))
+            .col_expr(task_runs::Column::UpdatedAt, Expr::value(Some(now)))
             .col_expr(
-                task_instances::Column::Status,
-                task_status_as_expr(new_status),
-            )
-            .col_expr(task_instances::Column::UpdatedAt, Expr::value(Some(now)))
-            .col_expr(
-                task_instances::Column::EndTime,
+                task_runs::Column::EndTime,
                 Expr::case(
                     Expr::value(matches!(
                         new_status,
-                        TaskStatus::Succeeded
-                            | TaskStatus::Failed
-                            | TaskStatus::Cancelled
-                            | TaskStatus::Skipped
+                        TaskRunStatus::Succeeded
+                            | TaskRunStatus::Failed
+                            | TaskRunStatus::Cancelled
+                            | TaskRunStatus::Skipped
                     )),
                     Expr::value(Some(now)),
                 )
-                .finally(Expr::col(task_instances::Column::EndTime))
+                .finally(Expr::col(task_runs::Column::EndTime))
                 .into(),
             )
-            .filter(task_instances::Column::Id.eq(task_id));
+            .filter(task_runs::Column::Id.eq(task_run_id));
 
         match new_status {
-            TaskStatus::Queued => {
+            TaskRunStatus::Queued => {
                 // Only pending tasks can be queued
                 update_query = update_query.filter(
-                    task_instances::Column::Status
-                        .eq(domain_task_status_to_db(TaskStatus::Pending)),
+                    task_runs::Column::Status.eq(domain_task_status_to_db(TaskRunStatus::Pending)),
                 );
             }
-            TaskStatus::Succeeded => {
+            TaskRunStatus::Succeeded => {
                 update_query = update_query
-                    .col_expr(task_instances::Column::EndTime, Expr::value(Some(now)))
+                    .col_expr(task_runs::Column::EndTime, Expr::value(Some(now)))
                     .col_expr(
-                        task_instances::Column::OutputMetadata,
+                        task_runs::Column::OutputMetadata,
                         Expr::value(metadata.clone()),
                     )
                     // Only running tasks can succeed
                     .filter(
-                        task_instances::Column::Status
-                            .eq(domain_task_status_to_db(TaskStatus::Running)),
+                        task_runs::Column::Status
+                            .eq(domain_task_status_to_db(TaskRunStatus::Running)),
                     );
             }
-            TaskStatus::Skipped => {
+            TaskRunStatus::Skipped => {
                 // Only pending tasks can be skipped
                 update_query = update_query.filter(
-                    task_instances::Column::Status
-                        .eq(domain_task_status_to_db(TaskStatus::Pending)),
+                    task_runs::Column::Status.eq(domain_task_status_to_db(TaskRunStatus::Pending)),
                 );
             }
-            TaskStatus::Retrying => {
+            TaskRunStatus::Retrying => {
                 update_query = update_query
                     .col_expr(
-                        task_instances::Column::StartTime,
+                        task_runs::Column::StartTime,
                         Expr::value(None::<DateTime<Utc>>),
                     )
                     .col_expr(
-                        task_instances::Column::EndTime,
+                        task_runs::Column::EndTime,
                         Expr::value(None::<DateTime<Utc>>),
                     )
                     .filter(
-                        task_instances::Column::Status
-                            .eq(domain_task_status_to_db(TaskStatus::Failed)),
+                        task_runs::Column::Status
+                            .eq(domain_task_status_to_db(TaskRunStatus::Failed)),
                     )
                     .filter(
-                        task_instances::Column::Status
-                            .eq(domain_task_status_to_db(TaskStatus::Cancelled)),
+                        task_runs::Column::Status
+                            .eq(domain_task_status_to_db(TaskRunStatus::Cancelled)),
                     );
             }
             _ => unreachable!("Cannot update task status to {:?}", new_status),
@@ -184,8 +182,8 @@ impl TaskDbTrait for PostgresStateDb {
             Ok(res) if res.rows_affected > 0 => {
                 if let Err(log_err) = log_event_in_txn(
                     &txn,
-                    Some(task_instance.run_id),
-                    Some(task_instance.id),
+                    Some(task_run.pipeline_run_id),
+                    Some(task_run.id),
                     EventType::TaskSuccess,
                     None,
                     metadata,
@@ -196,8 +194,8 @@ impl TaskDbTrait for PostgresStateDb {
 
                     log_event_direct(
                         &self.conn,
-                        Some(task_instance.run_id),
-                        Some(task_instance.id),
+                        Some(task_run.pipeline_run_id),
+                        Some(task_run.id),
                         EventType::EngineEvent,
                         Some(format!(
                             "Failed to log event: {}, error: {}",
@@ -219,7 +217,7 @@ impl TaskDbTrait for PostgresStateDb {
 
                 Err(Error::NotFound {
                     resource_type: "TaskInstance".into(),
-                    resource_id: task_instance.id.to_string(),
+                    resource_id: task_run.id.to_string(),
                 })
             }
             Err(db_err) => {
@@ -227,8 +225,8 @@ impl TaskDbTrait for PostgresStateDb {
 
                 log_event_direct(
                     &self.conn,
-                    Some(task_instance.run_id),
-                    Some(task_instance.id),
+                    Some(task_run.pipeline_run_id),
+                    Some(task_run.id),
                     EventType::EngineEvent,
                     Some(format!(
                         "Failed DB update for task event: {}, error: {}",
@@ -243,40 +241,35 @@ impl TaskDbTrait for PostgresStateDb {
         }
     }
 
-    async fn enqueue_task(&self, task_id: Uuid) -> Result<(), Error> {
-        self.update_task_status(task_id, TaskStatus::Queued, None, None)
-            .await
-    }
-
     async fn create_task_run(
         &self,
-        run_id: Uuid,
+        pipeline_run_id: Uuid,
         task_def_id: Uuid,
         attempt: u32,
-        status: TaskStatus,
+        status: TaskRunStatus,
         output: Option<serde_json::Value>,
         message: Option<String>,
     ) -> Result<(), Error> {
         let now: DateTime<FixedOffset> = Utc::now().into();
         let txn = self.conn.begin().await.map_err(db_error_to_domain)?;
 
-        let update_res = task_instances::Entity::update_many()
-            .col_expr(task_instances::Column::RunId, Expr::value(Some(run_id)))
+        let update_res = task_runs::Entity::update_many()
             .col_expr(
-                task_instances::Column::DefinitionId,
-                Expr::value(Some(task_def_id)),
+                task_runs::Column::PipelineRunId,
+                Expr::value(Some(pipeline_run_id)),
             )
-            .col_expr(task_instances::Column::Attempts, Expr::value(Some(attempt)))
+            .col_expr(task_runs::Column::TaskDefId, Expr::value(Some(task_def_id)))
+            .col_expr(task_runs::Column::Attempts, Expr::value(Some(attempt)))
             .col_expr(
-                task_instances::Column::Status,
+                task_runs::Column::Status,
                 Expr::value(Some(domain_task_status_to_db(status))),
             )
             .col_expr(
-                task_instances::Column::OutputMetadata,
+                task_runs::Column::OutputMetadata,
                 Expr::value(output.clone()),
             )
-            .col_expr(task_instances::Column::StartTime, Expr::value(Some(now)))
-            .filter(task_instances::Column::RunId.eq(run_id))
+            .col_expr(task_runs::Column::StartTime, Expr::value(Some(now)))
+            .filter(task_runs::Column::PipelineRunId.eq(pipeline_run_id))
             .exec(&txn)
             .await;
 
@@ -291,7 +284,7 @@ impl TaskDbTrait for PostgresStateDb {
 
                 Err(Error::NotFound {
                     resource_type: "TaskInstance".into(),
-                    resource_id: run_id.to_string(),
+                    resource_id: pipeline_run_id.to_string(),
                 })
             }
             Err(db_err) => {

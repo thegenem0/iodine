@@ -3,7 +3,7 @@ use std::{collections::HashMap, sync::Arc};
 use iodine_common::{
     error::Error,
     pipeline::{PipelineDefinition, PipelineRunStatus},
-    task::{TaskDefinition, TaskStatus},
+    task::{TaskDefinition, TaskRunStatus},
 };
 use tracing::info;
 use uuid::Uuid;
@@ -60,14 +60,14 @@ impl Launcher {
                         ))
                     })?;
 
-                self.task_states.insert(task_def_id, TaskStatus::Pending);
+                self.task_states.insert(task_def_id, TaskRunStatus::Pending);
 
                 self.state_manager
                     .create_task_run(
                         pipeline_run_id,
                         task_def.id,
                         0,
-                        TaskStatus::Pending,
+                        TaskRunStatus::Pending,
                         None,
                         None,
                     )

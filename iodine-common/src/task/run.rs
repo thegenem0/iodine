@@ -4,11 +4,11 @@ use strum_macros::{Display, EnumString};
 use uuid::Uuid;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct TaskInstance {
+pub struct TaskRun {
     pub id: Uuid,
     pub run_id: Uuid,
-    pub definition_id: Uuid,
-    pub status: TaskStatus,
+    pub task_def_id: Uuid,
+    pub status: TaskRunStatus,
     pub attempts: i32,
     pub start_time: Option<DateTime<Utc>>,
     pub end_time: Option<DateTime<Utc>>,
@@ -19,7 +19,7 @@ pub struct TaskInstance {
 
 #[derive(Clone, Debug, Copy, PartialEq, Eq, Serialize, Deserialize, EnumString, Display)]
 #[strum(serialize_all = "UPPERCASE")]
-pub enum TaskStatus {
+pub enum TaskRunStatus {
     Pending,
     Queued,
     Running,

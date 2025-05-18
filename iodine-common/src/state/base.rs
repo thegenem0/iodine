@@ -23,8 +23,8 @@ pub trait BaseDbTrait: Send + Sync + Debug + 'static {
     /// TODO(thegenem0): Should this be paginated?
     async fn list_event_logs(
         &self,
-        run_id: Option<Uuid>,
-        task_id: Option<Uuid>,
+        pipeline_run_id: Option<Uuid>,
+        task_run_id: Option<Uuid>,
         severity: Option<EventSeverity>,
         limit: Option<u64>,
     ) -> Result<HashMap<Uuid, EventLogRecord>, Error>;
@@ -37,8 +37,8 @@ pub trait BaseDbTrait: Send + Sync + Debug + 'static {
     /// appropriately within the given database call.
     async fn log_system_event(
         &self,
-        run_id: Option<Uuid>,
-        task_id: Option<Uuid>,
+        pipeline_run_id: Option<Uuid>,
+        task_run_id: Option<Uuid>,
         message: String,
         metadata: Option<serde_json::Value>,
         severity: EventSeverity,

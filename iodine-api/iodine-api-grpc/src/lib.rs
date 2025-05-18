@@ -1,4 +1,5 @@
 pub mod client;
+pub mod mapping;
 
 // use tonic::{Request, Response, Status};
 // use uuid::Uuid;

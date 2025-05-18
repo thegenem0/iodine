@@ -2,14 +2,15 @@ use std::{collections::HashMap, fmt::Debug, time::Duration};
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
-use strum_macros::EnumDiscriminants;
+use strum_macros::{Display, EnumDiscriminants, EnumString};
 use uuid::Uuid;
 
 use crate::error::Error;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, EnumDiscriminants)]
 #[strum_discriminants(name(ExecutionContextKind))]
-#[strum_discriminants(derive(Serialize, Deserialize, Hash))]
+#[strum_discriminants(derive(Serialize, Deserialize, Hash, Display, EnumString))]
+#[strum_discriminants(strum(serialize_all = "snake_case"))]
 #[non_exhaustive]
 pub enum ExecutionContext {
     LocalProcess(LocalProcessExecutionContext),
@@ -17,8 +18,15 @@ pub enum ExecutionContext {
     CloudRun,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+impl TryFrom<ExecutionContext> for serde_json::Value {
+    type Error = Error;
 
+    fn try_from(value: ExecutionContext) -> Result<Self, Self::Error> {
+        serde_json::to_value(value).map_err(Error::Serialization)
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct LocalProcessExecutionContext {
     /// The command to execute within the process.
     pub entry_point: Vec<String>,

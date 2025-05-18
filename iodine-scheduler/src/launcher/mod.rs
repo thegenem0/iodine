@@ -1,7 +1,7 @@
 use std::{sync::Arc, time::Duration};
 
 use iodine_common::{
-    pipeline::PipelineDefinition, resource_manager::ProvisionedWorkerDetails, task::TaskStatus,
+    pipeline::PipelineDefinition, resource_manager::ProvisionedWorkerDetails, task::TaskRunStatus,
 };
 use tokio::sync::oneshot;
 use uuid::Uuid;
@@ -43,7 +43,7 @@ pub struct WorkerResult {
     pub assigned_worker_id: Uuid,
     pub task_id: Uuid,
     pub attempt: u32,
-    pub final_status: TaskStatus,
+    pub final_status: TaskRunStatus,
     pub message: Option<String>,
 }
 

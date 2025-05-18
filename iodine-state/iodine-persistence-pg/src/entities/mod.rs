@@ -9,4 +9,4 @@ pub mod pipeline_definitions;
 pub mod pipeline_runs;
 pub mod sea_orm_active_enums;
 pub mod task_definitions;
-pub mod task_instances;
+pub mod task_runs;

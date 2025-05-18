@@ -31,8 +31,8 @@ pub enum PipelineRun {
     Table,
     #[iden = "id"]
     Id,
-    #[iden = "definition_id"]
-    DefinitionId,
+    #[iden = "pipeline_def_id"]
+    PipelineDefId,
     #[iden = "launcher_id"]
     LauncherId,
     #[iden = "status"]

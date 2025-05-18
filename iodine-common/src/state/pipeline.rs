@@ -21,7 +21,7 @@ pub trait PipelineDbTrait: BaseDbTrait {
     /// and can be expensive for large pipelines
     async fn get_pipeline_definition(
         &self,
-        pipeline_id: Uuid,
+        pipeline_def_id: Uuid,
     ) -> Result<Option<PipelineDefinition>, Error>;
 
     /// Lists all pipeline definitions
@@ -31,7 +31,7 @@ pub trait PipelineDbTrait: BaseDbTrait {
 
     /// Gets the metadata for a specific pipeline run by `run_id`.
     /// ---
-    async fn get_pipeline_run(&self, run_id: Uuid) -> Result<Option<PipelineRun>, Error>;
+    async fn get_pipeline_run(&self, pipeline_run_id: Uuid) -> Result<Option<PipelineRun>, Error>;
 
     /// Gets all active runs (currently `Running` or `Queued`)
     /// ---
@@ -47,7 +47,10 @@ pub trait PipelineDbTrait: BaseDbTrait {
     /// ---
     /// Only stores the information in the DB
     /// It `DOES NOT!` run or schedule the pipeline
-    async fn register_pipeline(&self, definition: &PipelineDefinition) -> Result<(), Error>;
+    async fn register_pipeline(
+        &self,
+        pipeline_definition: &PipelineDefinition,
+    ) -> Result<(), Error>;
 
     /// Deregisters a pipeline by `pipeline_id`
     /// ---
@@ -56,7 +59,7 @@ pub trait PipelineDbTrait: BaseDbTrait {
     /// acting as a cleanup call resulting from a
     /// `CodeRegistry` change where the pipeline
     /// is no longer available.
-    async fn deregister_pipeline(&self, pipeline_id: Uuid) -> Result<(), Error>;
+    async fn deregister_pipeline(&self, pipeline_def_id: Uuid) -> Result<(), Error>;
 
     /// Creates a new pipeline run
     /// ---
@@ -75,7 +78,7 @@ pub trait PipelineDbTrait: BaseDbTrait {
     /// Updates a pipeline run's status
     async fn update_pipeline_run_status(
         &self,
-        run_id: Uuid,
+        pipeline_run_id: Uuid,
         new_status: PipelineRunStatus,
         message: Option<String>,
     ) -> Result<(), Error>;
@@ -86,9 +89,9 @@ pub trait PipelineDbTrait: BaseDbTrait {
     /// and sets fields to indicate completion.
     /// This should be called on both success and
     /// failure to signal termination to the coordinator.
-    async fn finalize_run(
+    async fn finalize_pipeline_run(
         &self,
-        run_id: Uuid,
+        pipeline_run_id: Uuid,
         final_status: PipelineRunStatus,
         error_info: Option<&WorkerError>,
     ) -> Result<(), Error>;

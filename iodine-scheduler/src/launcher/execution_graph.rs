@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 use iodine_common::{
     error::Error,
     pipeline::{PipelineDefinition, PipelineRunStatus},
-    task::{TaskDefinition, TaskStatus},
+    task::{TaskDefinition, TaskRunStatus},
 };
 use petgraph::{
     Direction::{Incoming, Outgoing},
@@ -134,12 +134,12 @@ impl PipelineExecutionGraph {
     ///
     /// # Returns
     /// A vector of `Uuid`s for tasks that are now ready to be scheduled.
-    pub fn get_ready_tasks(&self, current_task_states: &HashMap<Uuid, TaskStatus>) -> Vec<Uuid> {
+    pub fn get_ready_tasks(&self, current_task_states: &HashMap<Uuid, TaskRunStatus>) -> Vec<Uuid> {
         let mut ready_tasks = Vec::new();
 
         for (node_idx, task_def_id) in &self.node_idx_to_task_id {
             match current_task_states.get(task_def_id) {
-                Some(TaskStatus::Pending) => {
+                Some(TaskRunStatus::Pending) => {
                     let mut dependencies_met = true;
 
                     for predecessor_node_idx in self.graph.neighbors_directed(*node_idx, Incoming) {
@@ -149,7 +149,7 @@ impl PipelineExecutionGraph {
                             .expect("Failed to find predecessor node index in node_idx_to_task_id");
 
                         match current_task_states.get(dep_task_id) {
-                            Some(TaskStatus::Succeeded) => { /* Dependency met, continue */ }
+                            Some(TaskRunStatus::Succeeded) => { /* Dependency met, continue */ }
                             _ => {
                                 dependencies_met = false;
                                 break;
@@ -183,7 +183,7 @@ impl PipelineExecutionGraph {
     /// * `None` if the pipeline is still running (some tasks are not yet in a terminal state).
     pub fn is_pipeline_complete(
         &self,
-        current_task_states: &HashMap<Uuid, TaskStatus>,
+        current_task_states: &HashMap<Uuid, TaskRunStatus>,
     ) -> Option<PipelineRunStatus> {
         if self.graph.node_count() == 0 {
             return Some(PipelineRunStatus::Succeeded); // Empty pipeline is always successful
@@ -194,17 +194,17 @@ impl PipelineExecutionGraph {
 
         for task_def_id in self.node_idx_to_task_id.values() {
             match current_task_states.get(task_def_id) {
-                Some(TaskStatus::Succeeded) => continue,
-                Some(TaskStatus::Failed)
-                | Some(TaskStatus::Cancelled)
-                | Some(TaskStatus::Skipped) => {
+                Some(TaskRunStatus::Succeeded) => continue,
+                Some(TaskRunStatus::Failed)
+                | Some(TaskRunStatus::Cancelled)
+                | Some(TaskRunStatus::Skipped) => {
                     any_task_failed = true;
                 }
-                Some(TaskStatus::Pending)
-                | Some(TaskStatus::Running)
-                | Some(TaskStatus::Retrying)
-                | Some(TaskStatus::Queued)
-                | Some(TaskStatus::Cancelling) => {
+                Some(TaskRunStatus::Pending)
+                | Some(TaskRunStatus::Running)
+                | Some(TaskRunStatus::Retrying)
+                | Some(TaskRunStatus::Queued)
+                | Some(TaskRunStatus::Cancelling) => {
                     all_tasks_accounted_for = false;
                     break; // Pipeline is definitely not complete yet
                 }

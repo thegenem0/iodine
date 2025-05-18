@@ -33,8 +33,8 @@ impl BaseDbTrait for PostgresStateDb {
 
     async fn list_event_logs(
         &self,
-        run_id: Option<Uuid>,
-        task_id: Option<Uuid>,
+        pipeline_run_id: Option<Uuid>,
+        task_run_id: Option<Uuid>,
         severity: Option<EventSeverity>,
         limit: Option<u64>,
     ) -> Result<HashMap<Uuid, EventLogRecord>, Error> {
@@ -43,8 +43,8 @@ impl BaseDbTrait for PostgresStateDb {
 
     async fn log_system_event(
         &self,
-        run_id: Option<Uuid>,
-        task_id: Option<Uuid>,
+        pipeline_run_id: Option<Uuid>,
+        task_run_id: Option<Uuid>,
         message: String,
         metadata: Option<serde_json::Value>,
         severity: EventSeverity,
@@ -62,8 +62,8 @@ impl BaseDbTrait for PostgresStateDb {
 
         log_event_direct(
             &self.conn,
-            run_id,
-            task_id,
+            pipeline_run_id,
+            task_run_id,
             EventType::EngineEvent,
             Some(message),
             Some(serde_json::Value::Object(event_meta)),

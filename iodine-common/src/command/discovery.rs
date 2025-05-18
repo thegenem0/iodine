@@ -8,4 +8,3 @@ pub enum DiscoveryCommand {
     ReloadRegistry { registry_id: Uuid },
     RemoveTrackedRegistry { registry_id: Uuid },
 }
-

@@ -38,8 +38,8 @@ pub enum PipelineRunStatus {
     Cancelled,
 }
 #[derive(Debug, Clone, PartialEq, Eq, EnumIter, DeriveActiveEnum, Serialize, Deserialize)]
-#[sea_orm(rs_type = "String", db_type = "Enum", enum_name = "task_status")]
-pub enum TaskStatus {
+#[sea_orm(rs_type = "String", db_type = "Enum", enum_name = "task_run_status")]
+pub enum TaskRunStatus {
     #[sea_orm(string_value = "PENDING")]
     Pending,
     #[sea_orm(string_value = "QUEUED")]

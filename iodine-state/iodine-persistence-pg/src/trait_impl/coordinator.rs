@@ -110,9 +110,7 @@ impl CoordinatorDbTrait for PostgresStateDb {
                     Expr::current_timestamp().into(),
                 );
             }
-            _ => {
-                // TODO(thegenem0):
-            }
+            _ => unimplemented!("Coordinator status update not implemented for {:?}", status),
         }
 
         let update_res = update_query.exec(&txn).await;
@@ -192,7 +190,7 @@ impl CoordinatorDbTrait for PostgresStateDb {
         &self,
         coordinator_id: Uuid,
         launcher_id: Uuid,
-        pipeline_id: Uuid,
+        pipeline_def_id: Uuid,
         _run_id_override: Option<Uuid>,
     ) -> Result<(), Error> {
         let now: DateTime<FixedOffset> = Utc::now().into();
@@ -201,7 +199,7 @@ impl CoordinatorDbTrait for PostgresStateDb {
         let insert_launcher_res = launchers::Entity::insert(launchers::ActiveModel {
             id: Set(launcher_id),
             coordinator_id: Set(coordinator_id),
-            assigned_pipeline_id: Set(Some(pipeline_id)),
+            assigned_pipeline_def_id: Set(Some(pipeline_def_id)),
             started_at: Set(Some(now)),
             terminated_at: Set(None),
         })

@@ -1,4 +1,4 @@
-use iodine_common::{error::Error, resource_manager::ProvisionedWorkerStatus, task::TaskStatus};
+use iodine_common::{error::Error, resource_manager::ProvisionedWorkerStatus, task::TaskRunStatus};
 use uuid::Uuid;
 
 use super::default::Launcher;
@@ -32,49 +32,49 @@ impl Launcher {
     /// - bool: Whether the task is terminal (i.e. no further status updates will be expected)
     pub(super) fn map_em_status_to_task_status(
         em_status: ProvisionedWorkerStatus,
-    ) -> (TaskStatus, Option<String>, bool) {
+    ) -> (TaskRunStatus, Option<String>, bool) {
         match em_status {
             ProvisionedWorkerStatus::Succeeded => (
-                TaskStatus::Succeeded,
+                TaskRunStatus::Succeeded,
                 Some("Completed successfully (per EM)".to_string()),
                 true,
             ),
             ProvisionedWorkerStatus::Failed => (
-                TaskStatus::Failed,
+                TaskRunStatus::Failed,
                 Some("Failed (per EM)".to_string()),
                 true,
             ),
             ProvisionedWorkerStatus::Cancelled => (
-                TaskStatus::Cancelled,
+                TaskRunStatus::Cancelled,
                 Some("Cancelled (per EM)".to_string()),
                 true,
             ),
             ProvisionedWorkerStatus::TimedOut => (
-                TaskStatus::Failed,
+                TaskRunStatus::Failed,
                 Some("Timed out (per EM)".to_string()),
                 true,
             ),
             ProvisionedWorkerStatus::Terminated => (
-                TaskStatus::Cancelled,
+                TaskRunStatus::Cancelled,
                 Some("Terminated by EM (interpreted as Cancelled/Failed)".to_string()),
                 true,
             ),
             ProvisionedWorkerStatus::ErrorState(e_msg) => (
-                TaskStatus::Failed,
+                TaskRunStatus::Failed,
                 Some(format!("EM ErrorState: {}", e_msg)),
                 true,
             ),
-            ProvisionedWorkerStatus::Running => (TaskStatus::Running, None, false),
+            ProvisionedWorkerStatus::Running => (TaskRunStatus::Running, None, false),
             ProvisionedWorkerStatus::Initializing | ProvisionedWorkerStatus::Pending => {
-                (TaskStatus::Queued, None, false)
+                (TaskRunStatus::Queued, None, false)
             }
             ProvisionedWorkerStatus::Terminating => (
-                TaskStatus::Running,
+                TaskRunStatus::Running,
                 Some("Terminating (per EM)".to_string()),
                 false, // Still active from Launcher's POV
             ),
             ProvisionedWorkerStatus::Unknown(m_opt) => (
-                TaskStatus::Running,
+                TaskRunStatus::Running,
                 m_opt.or(Some("Status unknown from EM".to_string())),
                 false, // Assume still needs monitoring
             ),

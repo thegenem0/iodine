@@ -10,7 +10,7 @@ use iodine_common::{
         ProvisionedWorkerDetails, WorkerRequest,
     },
     state::DatabaseTrait,
-    task::{TaskDefinition, TaskStatus},
+    task::{TaskDefinition, TaskRunStatus},
 };
 use tokio::{
     sync::{mpsc, oneshot},
@@ -54,7 +54,7 @@ pub struct Launcher {
     pub(super) execution_graph: Option<PipelineExecutionGraph>,
 
     /// `TaskDefinition` ID -> Current `TaskStatus`
-    pub(super) task_states: HashMap<Uuid, TaskStatus>,
+    pub(super) task_states: HashMap<Uuid, TaskRunStatus>,
 
     /// `TaskDefinition` ID -> Current task attempt
     pub(super) task_attempts: HashMap<Uuid, u32>,
@@ -176,8 +176,7 @@ impl Launcher {
                     return Err(Error::Conflict(msg));
                 }
 
-                self.initialize_pipeline_state(pipeline_definition)
-                    .await?;
+                self.initialize_pipeline_state(pipeline_definition).await?;
 
                 self.schedule_and_launch_tasks().await?;
             }
@@ -253,7 +252,7 @@ impl Launcher {
             assigned_worker_id
         );
 
-        self.task_states.insert(task_def.id, TaskStatus::Queued);
+        self.task_states.insert(task_def.id, TaskRunStatus::Queued);
         self.task_attempts.insert(task_def.id, attempt);
 
         // FIXME(thegenem0):
@@ -350,7 +349,7 @@ impl Launcher {
         );
 
         #[allow(unused_assignments)]
-        let mut final_task_status: Option<TaskStatus> = None;
+        let mut final_task_status: Option<TaskRunStatus> = None;
 
         #[allow(unused_assignments)]
         let mut final_message: Option<String> = None;
@@ -368,7 +367,7 @@ impl Launcher {
                         info!("[PollingMonitor for '{}' ({})] EM cancel_execution succeeded.", task_name, assigned_worker_id);
                     }
 
-                    final_task_status = Some(TaskStatus::Cancelled);
+                    final_task_status = Some(TaskRunStatus::Cancelled);
                     final_message = Some("Cancelled by Launcher request.".to_string());
                     break;
                 }
@@ -383,7 +382,7 @@ impl Launcher {
                                     final_task_status = Some(current_task_status);
                                     final_message = msg;
                                     break;
-                                } else if current_task_status != TaskStatus::Running {
+                                } else if current_task_status != TaskRunStatus::Running {
                                     // Optionally could send intermediate "Running" status?
                                     // only final status is critical for DAG progression, but
                                     // might be nice to have?
@@ -391,7 +390,7 @@ impl Launcher {
                             }
                             Err(e) => {
                                 error!("[PollingMonitor for '{}' ({})] Error polling EM status: {}. Marking as failed.", task_name, assigned_worker_id, e);
-                                final_task_status = Some(TaskStatus::Failed);
+                                final_task_status = Some(TaskRunStatus::Failed);
                                 final_message = Some(format!("Error polling EM: {}", e));
                                 break;
                             }
@@ -404,7 +403,7 @@ impl Launcher {
             assigned_worker_id,
             task_id,
             attempt,
-            final_status: final_task_status.unwrap_or(TaskStatus::Failed),
+            final_status: final_task_status.unwrap_or(TaskRunStatus::Failed),
             message: final_message,
         };
 
@@ -466,16 +465,17 @@ impl Launcher {
         })?;
 
         // FIXME(thegenem0):
+        // ---
         // Add this state update method
         //  self.state_manager.update_task_run_status(
         //     pipeline_run_id, result.task_id, result.attempt,
         //     result.final_status.clone(),
         //     None, Some(Utc::now()),
-        //     // TODO(thegenem0): Get actual start/end times from EM (via WorkerResult/ProvisionedWorkerDetails)
+        //     // Get actual start/end times from EM (via WorkerResult/ProvisionedWorkerDetails)
         //     result.message,
         // ).await?;
 
-        if result.final_status == TaskStatus::Failed {
+        if result.final_status == TaskRunStatus::Failed {
             let _task_def = self
                 .execution_graph
                 .as_ref()
@@ -497,7 +497,7 @@ impl Launcher {
 
                 // reset for next scheduling cycle
                 self.task_states
-                    .insert(result.task_id, TaskStatus::Retrying);
+                    .insert(result.task_id, TaskRunStatus::Retrying);
                 // The attempt count in self.task_attempts (number of attempts *made*) is already correct.
                 // The next call to schedule_and_launch_tasks will use `self.task_attempts.get() + 1`.
             } else {
@@ -548,6 +548,7 @@ impl Launcher {
                     self.id, worker_id
                 );
                 // FIXME(thegenem0): Need a robust way to mark the associated pipeline task as errored here.
+                // ---
                 // This requires mapping worker_id back to task_id if not available from join_handle return.
                 // For now, this state means we might have a zombie task status.
             }
@@ -594,10 +595,11 @@ impl Launcher {
             .await?;
 
         // TODO(thegenem0): Notify Coordinator via CommandRouter
+        // ---
         // Example:
         // let update_to_coord = CoordinatorCommand::PipelineStatusUpdate {
         //     pipeline_run_id: run_id,
-        //     pipchrome://vivaldi-webui/startpage?section=Speed-dials&background-color=#1c1c1eeline_def_id: def_id,
+        //     pipeline_def_id: def_id,
         //     launcher_id: self.id,
         //     status,
         // };

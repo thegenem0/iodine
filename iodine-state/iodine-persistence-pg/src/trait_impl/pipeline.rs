@@ -29,21 +29,23 @@ use crate::mapping::{
 impl PipelineDbTrait for PostgresStateDb {
     async fn get_pipeline_definition(
         &self,
-        pipeline_id: Uuid,
+        pipeline_def_id: Uuid,
     ) -> Result<Option<PipelineDefinition>, Error> {
-        let maybe_pipeline_def = pipeline_definitions::Entity::find_by_id(pipeline_id)
+        let maybe_pipeline_def = pipeline_definitions::Entity::find_by_id(pipeline_def_id)
             .one(&self.conn)
             .await
             .map_err(db_error_to_domain)?;
 
         let task_defs = task_definitions::Entity::find()
-            .filter(task_definitions::Column::PipelineId.eq(pipeline_id))
+            .filter(task_definitions::Column::PipelineDefId.eq(pipeline_def_id))
             .all(&self.conn)
             .await
             .map_err(db_error_to_domain)?;
 
         if let Some(pipeline_def) = maybe_pipeline_def {
-            Ok(Some(pipeline_definition_to_domain(pipeline_def, task_defs)))
+            let def = pipeline_definition_to_domain(pipeline_def, task_defs)?;
+
+            Ok(Some(def))
         } else {
             Ok(None)
         }
@@ -66,8 +68,8 @@ impl PipelineDbTrait for PostgresStateDb {
         ))
     }
 
-    async fn get_pipeline_run(&self, run_id: Uuid) -> Result<Option<PipelineRun>, Error> {
-        let maybe_pipeline_run = pipeline_runs::Entity::find_by_id(run_id)
+    async fn get_pipeline_run(&self, pipeline_run_id: Uuid) -> Result<Option<PipelineRun>, Error> {
+        let maybe_pipeline_run = pipeline_runs::Entity::find_by_id(pipeline_run_id)
             .one(&self.conn)
             .await
             .map_err(db_error_to_domain)?;
@@ -109,25 +111,28 @@ impl PipelineDbTrait for PostgresStateDb {
         ))
     }
 
-    async fn register_pipeline(&self, definition: &PipelineDefinition) -> Result<(), Error> {
+    async fn register_pipeline(
+        &self,
+        pipeline_definition: &PipelineDefinition,
+    ) -> Result<(), Error> {
         let txn = self.conn.begin().await.map_err(db_error_to_domain)?;
-        let def_id = definition.info.id;
+        let def_id = pipeline_definition.info.id;
 
         task_definitions::Entity::delete_many()
-            .filter(task_definitions::Column::PipelineId.eq(def_id))
+            .filter(task_definitions::Column::PipelineDefId.eq(def_id))
             .exec(&txn)
             .await
             .map_err(db_error_to_domain)?;
 
         let def_active_model = pipeline_definitions::ActiveModel {
-            id: Set(definition.info.id),
-            name: Set(Some(definition.info.name.clone())),
-            description: Set(Some(definition.info.description.clone())),
-            metadata: Set(definition.info.metadata.clone()),
+            id: Set(pipeline_definition.info.id),
+            name: Set(Some(pipeline_definition.info.name.clone())),
+            description: Set(Some(pipeline_definition.info.description.clone())),
+            metadata: Set(pipeline_definition.info.metadata.clone()),
             created_at: ActiveValue::NotSet,
             updated_at: Set(Utc::now().into()),
-            default_backend: Set(Some(definition.info.default_backend.to_string())),
-            default_tags: Set(definition.info.default_tags.clone()),
+            default_backend: Set(Some(pipeline_definition.info.default_backend.to_string())),
+            default_tags: Set(pipeline_definition.info.default_tags.clone()),
         };
 
         let update_event: EventType;
@@ -156,17 +161,22 @@ impl PipelineDbTrait for PostgresStateDb {
             }
         };
 
-        let taks_inserts: Vec<task_definitions::ActiveModel> = definition
+        let taks_inserts: Vec<task_definitions::ActiveModel> = pipeline_definition
             .task_definitions
             .iter()
-            .map(|task| task_definitions::ActiveModel {
-                id: Set(task.id),
-                pipeline_id: Set(task.pipeline_id),
-                name: Set(task.name.clone()),
-                description: Set(task.description.clone()),
-                config_schema: Set(task.config_schema.clone()),
-                user_code_metadata: Set(task.user_code_metadata.clone()),
-                depends_on: Set(Some(task.depends_on.clone())),
+            .map(|task| {
+                let execution_ctx: serde_json::Value =
+                    task.execution_ctx.clone().try_into().unwrap_or_default();
+
+                return task_definitions::ActiveModel {
+                    id: Set(task.id),
+                    pipeline_def_id: Set(task.pipeline_def_id),
+                    name: Set(task.name.clone()),
+                    description: Set(task.description.clone()),
+                    execution_context: Set(execution_ctx),
+                    max_attempts: Set(task.max_attempts.map(|m| m as i32)),
+                    depends_on: Set(Some(task.depends_on.clone())),
+                };
             })
             .collect();
 
@@ -179,8 +189,8 @@ impl PipelineDbTrait for PostgresStateDb {
 
         let message = format!(
             "Registered pipeline definition with id {} and {} nodes",
-            definition.info.id,
-            definition.task_definitions.len(),
+            pipeline_definition.info.id,
+            pipeline_definition.task_definitions.len(),
         );
 
         log_event_in_txn(&txn, None, None, update_event, Some(message), None)
@@ -192,32 +202,35 @@ impl PipelineDbTrait for PostgresStateDb {
         Ok(())
     }
 
-    async fn deregister_pipeline(&self, pipeline_id: Uuid) -> Result<(), Error> {
+    async fn deregister_pipeline(&self, pipeline_def_id: Uuid) -> Result<(), Error> {
         // TODO(thegenem0):
         // probably don't want to actually delete these records.
         // could be used for historical viewing, maybe just mark them as deregistered?
 
         let txn = self.conn.begin().await.map_err(db_error_to_domain)?;
 
-        let pipeline_def = pipeline_definitions::Entity::find_by_id(pipeline_id)
+        let pipeline_def = pipeline_definitions::Entity::find_by_id(pipeline_def_id)
             .one(&txn)
             .await
             .map_err(db_error_to_domain)?;
 
         if let Some(pipeline_def) = pipeline_def {
             task_definitions::Entity::delete_many()
-                .filter(task_definitions::Column::PipelineId.eq(pipeline_id))
+                .filter(task_definitions::Column::PipelineDefId.eq(pipeline_def_id))
                 .exec(&txn)
                 .await
                 .map_err(db_error_to_domain)?;
 
-            pipeline_definitions::Entity::delete_by_id(pipeline_id)
+            pipeline_definitions::Entity::delete_by_id(pipeline_def_id)
                 .exec(&txn)
                 .await
                 .map_err(db_error_to_domain)?;
         }
 
-        let message = format!("Deregistered pipeline definition with id {}", pipeline_id);
+        let message = format!(
+            "Deregistered pipeline definition with id {}",
+            pipeline_def_id
+        );
 
         log_event_in_txn(
             &txn,
@@ -248,7 +261,7 @@ impl PipelineDbTrait for PostgresStateDb {
 
         let new_run = pipeline_runs::ActiveModel {
             id: Set(run_id),
-            definition_id: Set(pipeline_def_id),
+            pipeline_def_id: Set(pipeline_def_id),
             launcher_id: Set(launcher_id),
             status: Set(domain_pipeline_status_to_db(PipelineRunStatus::Queued)),
             ..Default::default()
@@ -304,7 +317,7 @@ impl PipelineDbTrait for PostgresStateDb {
 
     async fn update_pipeline_run_status(
         &self,
-        run_id: Uuid,
+        pipeline_run_id: Uuid,
         new_status: PipelineRunStatus,
         message: Option<String>,
     ) -> Result<(), Error> {
@@ -329,25 +342,26 @@ impl PipelineDbTrait for PostgresStateDb {
                 pipeline_runs::Column::UpdatedAt,
                 Expr::value(Some(Utc::now())),
             )
-            .filter(pipeline_runs::Column::Id.eq(run_id))
+            .filter(pipeline_runs::Column::Id.eq(pipeline_run_id))
             .exec(&txn)
             .await;
 
         match update_res {
             Ok(res) if res.rows_affected > 0 => {
                 if let Err(db_err) =
-                    log_event_in_txn(&txn, Some(run_id), None, event_type, message, None).await
+                    log_event_in_txn(&txn, Some(pipeline_run_id), None, event_type, message, None)
+                        .await
                 {
                     txn.rollback().await.map_err(db_error_to_domain)?;
 
                     log_event_direct(
                         &self.conn,
-                        Some(run_id),
+                        Some(pipeline_run_id),
                         None,
                         EventType::EngineEvent,
                         Some(format!(
                             "Failed to log enqueue event for run{}: {}",
-                            run_id, db_err
+                            pipeline_run_id, db_err
                         )),
                         Some(serde_json::json!({"action": "record_run_enqueued"})),
                     )
@@ -365,7 +379,7 @@ impl PipelineDbTrait for PostgresStateDb {
 
                 Err(Error::NotFound {
                     resource_type: "DagRun".into(),
-                    resource_id: run_id.to_string(),
+                    resource_id: pipeline_run_id.to_string(),
                 })
             }
             Err(db_err) => {
@@ -373,7 +387,7 @@ impl PipelineDbTrait for PostgresStateDb {
 
                 log_event_direct(
                     &self.conn,
-                    Some(run_id),
+                    Some(pipeline_run_id),
                     None,
                     EventType::EngineEvent,
                     Some(format!("Failed DB update for run enqueue: {}", db_err)),
@@ -386,9 +400,9 @@ impl PipelineDbTrait for PostgresStateDb {
         }
     }
 
-    async fn finalize_run(
+    async fn finalize_pipeline_run(
         &self,
-        run_id: Uuid,
+        pipeline_run_id: Uuid,
         final_status: PipelineRunStatus,
         error_info: Option<&WorkerError>,
     ) -> Result<(), Error> {
@@ -411,7 +425,7 @@ impl PipelineDbTrait for PostgresStateDb {
             )
             .col_expr(pipeline_runs::Column::EndTime, Expr::value(Some(now)))
             .col_expr(pipeline_runs::Column::UpdatedAt, Expr::value(Some(now)))
-            .filter(pipeline_runs::Column::Id.eq(run_id))
+            .filter(pipeline_runs::Column::Id.eq(pipeline_run_id))
             .filter(
                 Condition::any()
                     .add(
@@ -437,19 +451,25 @@ impl PipelineDbTrait for PostgresStateDb {
                     _ => unreachable!(),
                 };
 
-                if let Err(db_err) =
-                    log_event_in_txn(&txn, Some(run_id), None, event_type, None, event_metadata)
-                        .await
+                if let Err(db_err) = log_event_in_txn(
+                    &txn,
+                    Some(pipeline_run_id),
+                    None,
+                    event_type,
+                    None,
+                    event_metadata,
+                )
+                .await
                 {
                     txn.rollback().await.map_err(db_error_to_domain)?;
                     log_event_direct(
                         &self.conn,
-                        Some(run_id),
+                        Some(pipeline_run_id),
                         None,
                         EventType::EngineEvent,
                         Some(format!(
                             "Failed to log status event for run {}: {}",
-                            run_id, db_err
+                            pipeline_run_id, db_err
                         )),
                         Some(serde_json::json!({"action": "record_run_status"})),
                     )
@@ -466,7 +486,7 @@ impl PipelineDbTrait for PostgresStateDb {
 
                 Err(Error::StateTransition(format!(
                     "Run {} not found or not in Running/Canceling state for final update",
-                    run_id
+                    pipeline_run_id
                 )))
             }
             Err(db_err) => {
@@ -474,7 +494,7 @@ impl PipelineDbTrait for PostgresStateDb {
 
                 log_event_direct(
                     &self.conn,
-                    Some(run_id),
+                    Some(pipeline_run_id),
                     None,
                     EventType::EngineEvent,
                     Some(format!("Failed DB update for run status: {}", db_err)),

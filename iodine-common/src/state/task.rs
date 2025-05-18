@@ -3,7 +3,7 @@ use uuid::Uuid;
 
 use crate::{
     error::Error,
-    task::{TaskDefinition, TaskInstance, TaskStatus},
+    task::{TaskDefinition, TaskRun, TaskRunStatus},
 };
 
 use super::base::BaseDbTrait;
@@ -12,10 +12,8 @@ use super::base::BaseDbTrait;
 pub trait TaskDbTrait: BaseDbTrait {
     /// Gets a task definition by `definition_id`
     /// ---
-    async fn get_task_definition(
-        &self,
-        definition_id: Uuid,
-    ) -> Result<Option<TaskDefinition>, Error>;
+    async fn get_task_definition(&self, task_def_id: Uuid)
+    -> Result<Option<TaskDefinition>, Error>;
 
     /// Lists all task definitions
     /// ---
@@ -23,21 +21,21 @@ pub trait TaskDbTrait: BaseDbTrait {
     /// TODO(thegenem0): Should this be paginated?
     async fn list_task_definitions(
         &self,
-        pipeline_id: Option<Uuid>,
+        pipeline_def_id: Option<Uuid>,
     ) -> Result<(Vec<TaskDefinition>, u64), Error>;
 
     /// Gets a task instance by `task_id`
     /// ---
-    async fn get_task_instance(&self, task_id: Uuid) -> Result<Option<TaskInstance>, Error>;
+    async fn get_task_run(&self, task_run_id: Uuid) -> Result<Option<TaskRun>, Error>;
 
     /// Lists all task instances
     /// ---
     /// Can optionally filter by `run_id`
     /// TODO(thegenem0): Should this be paginated?
-    async fn list_task_instances(
+    async fn list_task_runs(
         &self,
-        run_id: Option<Uuid>,
-    ) -> Result<(Vec<TaskInstance>, u64), Error>;
+        pipeline_run_id: Option<Uuid>,
+    ) -> Result<(Vec<TaskRun>, u64), Error>;
 
     /// Updates the status of a task instance
     /// ---
@@ -45,18 +43,13 @@ pub trait TaskDbTrait: BaseDbTrait {
     /// for logging purposes.
     /// If `error_data` is provided, it will be
     /// stored along with the status change.
-    async fn update_task_status(
+    async fn update_task_run_status(
         &self,
-        task_id: Uuid,
-        new_status: TaskStatus,
+        task_run_id: Uuid,
+        new_status: TaskRunStatus,
         metadata: Option<serde_json::Value>,
         error_data: Option<serde_json::Value>,
     ) -> Result<(), Error>;
-
-    /// Convenience method enqueue a task for execution
-    /// ---
-    /// Should be called by an `<impl RunLauncher>` instance
-    async fn enqueue_task(&self, task_id: Uuid) -> Result<(), Error>;
 
     /// Creates a new `TaskRun` for a `TaskDefinition` with `run_id`
     /// ---
@@ -67,7 +60,7 @@ pub trait TaskDbTrait: BaseDbTrait {
         run_id: Uuid,
         task_def_id: Uuid,
         attempt: u32,
-        status: TaskStatus,
+        status: TaskRunStatus,
         output: Option<serde_json::Value>,
         message: Option<String>,
     ) -> Result<(), Error>;

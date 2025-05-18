@@ -7,10 +7,10 @@ pub enum EventLog {
     Table,
     #[iden = "event_id"]
     EventId,
-    #[iden = "run_id"]
-    RunId,
-    #[iden = "task_id"]
-    TaskId,
+    #[iden = "pipeline_run_id"]
+    PipelineRunId,
+    #[iden = "task_run_id"]
+    TaskRunId,
     #[iden = "timestamp"]
     Timestamp,
     #[iden = "event_type"]

@@ -1,17 +1,23 @@
+use std::collections::HashMap;
+
 use iodine_common::error::Error;
 use iodine_protobuf::{
     json_value_to_prost_struct,
     v1::{
-        GetPipelineDefinitionsRequest, GetPipelineDefinitionsResponse, GetRegistryMetadataRequest,
-        GetRegistryMetadataResponse, PipelineDefinitionProto, TaskDefinitionProto,
-        TaskDependencyProto, pipeline_registry_service_server::PipelineRegistryService,
+        ExecutionContextProto, GetPipelineDefinitionsRequest, GetPipelineDefinitionsResponse,
+        GetRegistryMetadataRequest, GetRegistryMetadataResponse, LocalProcessContextDataProto,
+        PipelineDefinitionProto, TaskDefinitionProto, execution_context_proto::ContextVariant,
+        pipeline_registry_service_server::PipelineRegistryService,
     },
 };
 use tonic::{Request, Response, Status};
 use tracing::{error, info, instrument};
 use uuid::Uuid;
 
-use crate::{MASTER_SYSTEM_NAMESPACE, parse_yaml, schema::RegistryConfig};
+use crate::{
+    MASTER_SYSTEM_NAMESPACE, parse_yaml,
+    schema::{ExecutorConfig, RegistryConfig},
+};
 
 #[derive(Debug)]
 #[allow(dead_code)]
@@ -76,7 +82,6 @@ impl PipelineRegistryService for GrpcPipelineRegistryService {
 
         for def in self.config.pipelines.iter() {
             let mut task_defs: Vec<TaskDefinitionProto> = Vec::new();
-            let task_deps: Vec<TaskDependencyProto> = Vec::new();
 
             let pipeline_name = format!("pipe-{}", def.id);
             let pipeline_id = Uuid::new_v5(&self.registry_id, pipeline_name.as_bytes());
@@ -85,16 +90,43 @@ impl PipelineRegistryService for GrpcPipelineRegistryService {
                 let task_name = format!("{}-{}", def.id, step.id);
                 let task_def_id = Uuid::new_v5(&pipeline_id, task_name.as_bytes());
 
+                let exec_ctx = match &step.executor_config {
+                    ExecutorConfig::LocalProcess(local_proc) => {
+                        let env_vars: HashMap<String, String> = local_proc
+                            .env_vars
+                            .clone()
+                            .into_iter()
+                            .map(|kv| (kv.key, kv.value))
+                            .collect();
+
+                        let exec_timeout =
+                            local_proc.timeout_seconds.map(|t| prost_types::Duration {
+                                seconds: t,
+                                nanos: 0,
+                            });
+
+                        let exec_ctx = ExecutionContextProto {
+                            context_variant: Some(ContextVariant::LocalProcess(
+                                LocalProcessContextDataProto {
+                                    entry_point: local_proc.entry_point.clone(),
+                                    args: local_proc.args.clone(),
+                                    env_vars,
+                                    exec_timeout,
+                                },
+                            )),
+                        };
+                        Some(exec_ctx)
+                    }
+                    _ => unimplemented!(),
+                };
+
                 let task_def = TaskDefinitionProto {
                     id: task_def_id.to_string(),
                     name: task_name.clone(),
                     description: step.description.clone(),
-                    config_schema: json_value_to_prost_struct(serde_json::Value::Object(
-                        serde_json::Map::new(),
-                    )),
-                    user_code_metadata: json_value_to_prost_struct(serde_json::Value::Object(
-                        serde_json::Map::new(),
-                    )),
+                    execution_context: exec_ctx,
+                    max_attempts: step.max_attempts,
+                    depends_on: step.depends_on.clone(),
                 };
                 task_defs.push(task_def);
             }
@@ -114,7 +146,6 @@ impl PipelineRegistryService for GrpcPipelineRegistryService {
                     serde_json::Map::new(),
                 )),
                 task_definitions: task_defs,
-                task_dependencies: task_deps,
             };
 
             def_protos.push(proto);
