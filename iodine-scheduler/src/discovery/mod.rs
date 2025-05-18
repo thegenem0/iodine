@@ -73,8 +73,6 @@ impl RegistryDiscoveryService {
                             }
 
                         }
-                        // Command should never be `None`
-                        None => unreachable!(),
                         _ => unimplemented!(),
                     }
                 }

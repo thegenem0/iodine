@@ -24,11 +24,11 @@ pub struct Step {
     pub max_attempts: Option<i32>,
     pub working_directory: String,
     pub entrypoint: String,
-    pub depends_on: Vec<String>,
+    pub depends_on: Option<Vec<String>>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
-#[serde(rename_all = "snake_case", untagged)]
+#[serde(rename_all = "snake_case")]
 pub enum ExecutorConfig {
     LocalProcess(LocalProcessConfig),
     Docker(DockerConfig),
@@ -40,7 +40,6 @@ pub struct LocalProcessConfig {
     pub entry_point: Vec<String>,
     pub args: Vec<String>,
     pub env_vars: Vec<KvPair>,
-    pub exec_timeout: Option<i64>,
     pub cpu_request: Option<String>,
     pub memory_request: Option<String>,
     pub timeout_seconds: Option<i64>,

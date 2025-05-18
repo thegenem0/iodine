@@ -110,7 +110,7 @@ impl CoordinatorDbTrait for PostgresStateDb {
                     Expr::current_timestamp().into(),
                 );
             }
-            _ => unimplemented!("Coordinator status update not implemented for {:?}", status),
+            _ => {}
         }
 
         let update_res = update_query.exec(&txn).await;

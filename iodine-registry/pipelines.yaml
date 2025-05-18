@@ -6,8 +6,6 @@ pipelines:
     steps:
       - id: step_01
         description: This is a modified step
-        needs:
-          - Step 2
         working_directory: ./src/pipeline
         entrypoint: task_1.py
         environment:
@@ -16,15 +14,23 @@ pipelines:
         labels:
           - key: key
             value: value
-        executor_config:
-          local_process:
-            cpu_request: 100m
-            memory_request: 100m
-            timeout_seconds: 10
+        executor_config: !local_process
+          entry_point:
+            - python
+            - task_1.py
+          args:
+            - arg1
+            - arg2
+          env_vars:
+            - key: key
+              value: value
+          cpu_request: 100m
+          memory_request: 100m
+          timeout_seconds: 10
       - id: step_02
         description: This is a modified step
-        needs:
-          - Step 1
+        depends_on:
+          - step_01
         working_directory: ./src/pipeline
         entrypoint: python
         environment:
@@ -33,15 +39,23 @@ pipelines:
         labels:
           - key: key
             value: value
-        executor_config:
-          local_process:
-            cpu_request: 100m
-            memory_request: 100m
-            timeout_seconds: 10
+        executor_config: !local_process
+          entry_point:
+            - python
+            - task_2.py
+          args:
+            - arg1
+            - arg2
+          env_vars:
+            - key: key
+              value: value
+          cpu_request: 100m
+          memory_request: 100m
+          timeout_seconds: 10
       - id: step_03
         description: This is a modified step
-        needs:
-          - Step 1
+        depends_on:
+          - step_02
         working_directory: ./src/pipeline
         entrypoint: python
         environment:
@@ -50,18 +64,24 @@ pipelines:
         labels:
           - key: key
             value: value
-        executor_config:
-          local_process:
-            cpu_request: 100m
-            memory_request: 100m
-            timeout_seconds: 10
+        executor_config: !local_process
+          entry_point:
+            - python
+            - task_3.py
+          args:
+            - arg1
+            - arg2
+          env_vars:
+            - key: key
+              value: value
+          cpu_request: 100m
+          memory_request: 100m
+          timeout_seconds: 10
   - id: pipeline_02
     description: This is a pipeline
     steps:
       - id: step_01
         description: This is a modified step
-        needs:
-          - Step 2
         working_directory: ./src/pipeline
         entrypoint: python
         environment:
@@ -70,15 +90,21 @@ pipelines:
         labels:
           - key: key
             value: value
-        executor_config:
-          local_process:
-            cpu_request: 100m
-            memory_request: 100m
-            timeout_seconds: 10
+        executor_config: !local_process
+          entry_point:
+            - python
+            - task_1.py
+          args:
+            - arg1
+            - arg2
+          env_vars:
+            - key: key
+              value: value
+          cpu_request: 100m
+          memory_request: 100m
+          timeout_seconds: 10
       - id: step_02
         description: This is a modified step
-        needs:
-          - Step 1
         working_directory: ./src/pipeline
         entrypoint: python
         environment:
@@ -87,15 +113,24 @@ pipelines:
         labels:
           - key: key
             value: value
-        executor_config:
-          local_process:
-            cpu_request: 100m
-            memory_request: 100m
-            timeout_seconds: 10
+        executor_config: !local_process
+          entry_point:
+            - python
+            - task_2.py
+          args:
+            - arg1
+            - arg2
+          env_vars:
+            - key: key
+              value: value
+          cpu_request: 100m
+          memory_request: 100m
+          timeout_seconds: 10
       - id: step_03
         description: This is a modified step
-        needs:
-          - Step 1
+        depends_on:
+          - step_01
+          - step_02
         working_directory: ./src/pipeline
         entrypoint: python
         environment:
@@ -104,8 +139,16 @@ pipelines:
         labels:
           - key: key
             value: value
-        executor_config:
-          local_process:
-            cpu_request: 100m
-            memory_request: 100m
-            timeout_seconds: 10
+        executor_config: !local_process
+          entry_point:
+            - python
+            - task_3.py
+          args:
+            - arg1
+            - arg2
+          env_vars:
+            - key: key
+              value: value
+          cpu_request: 100m
+          memory_request: 100m
+          timeout_seconds: 10

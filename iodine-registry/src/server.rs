@@ -86,9 +86,17 @@ impl PipelineRegistryService for GrpcPipelineRegistryService {
             let pipeline_name = format!("pipe-{}", def.id);
             let pipeline_id = Uuid::new_v5(&self.registry_id, pipeline_name.as_bytes());
 
+            let mut id_map: HashMap<String, Uuid> = HashMap::new();
+
+            for step in def.steps.iter() {
+                let task_name = format!("{}-{}", def.id, step.id.clone());
+                let task_def_id = Uuid::new_v5(&pipeline_id, task_name.as_bytes());
+                id_map.insert(step.id.clone(), task_def_id);
+            }
+
             for step in def.steps.iter() {
                 let task_name = format!("{}-{}", def.id, step.id);
-                let task_def_id = Uuid::new_v5(&pipeline_id, task_name.as_bytes());
+                let task_def_id = id_map.get(&step.id).unwrap(); // This can't really fail.
 
                 let exec_ctx = match &step.executor_config {
                     ExecutorConfig::LocalProcess(local_proc) => {
@@ -120,13 +128,28 @@ impl PipelineRegistryService for GrpcPipelineRegistryService {
                     _ => unimplemented!(),
                 };
 
+                let mut depends_on: Vec<String> = Vec::new();
+
+                if let Some(deps) = &step.depends_on {
+                    for dep in deps.iter() {
+                        match id_map.get(dep) {
+                            Some(id) => {
+                                depends_on.push(id.to_string());
+                            }
+                            None => {
+                                eprintln!("Failed to find dependency task with ID {}", dep);
+                            }
+                        }
+                    }
+                }
+
                 let task_def = TaskDefinitionProto {
                     id: task_def_id.to_string(),
                     name: task_name.clone(),
                     description: step.description.clone(),
                     execution_context: exec_ctx,
                     max_attempts: step.max_attempts,
-                    depends_on: step.depends_on.clone(),
+                    depends_on: depends_on.clone(),
                 };
                 task_defs.push(task_def);
             }
